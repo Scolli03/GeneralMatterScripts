@@ -64,8 +64,9 @@ The script automatically calculates the adjusted price as:
 
 ## API Endpoints Used
 
-- `/user/?selections=items` - Fetches user's items (including market listings)
-- `/torn/?selections=items&ids={itemId}` - Fetches detailed item information
+- `GET /v2/user/itemmarket` - Fetches user's item market listings with complete item details (Torn API v2)
+- Uses Authorization header with `ApiKey` format
+- Supports pagination via `offset` parameter
 
 ## Troubleshooting
 
