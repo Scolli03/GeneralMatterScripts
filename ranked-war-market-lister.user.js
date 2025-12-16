@@ -59,8 +59,8 @@
             return true;
         }
         
-        // Check by item type - Primary, Secondary, or Melee with quality/bonus stats
-        // Ranked war items are weapons (Primary, Secondary, Melee) with quality/bonus modifiers
+        // Check by item type - Primary, Secondary, Melee, or Defensive with quality/bonus stats
+        // Ranked war items are weapons (Primary, Secondary, Melee) or armor (Defensive) with quality/bonus modifiers
         const hasQuality = stats.quality !== undefined && stats.quality !== null;
         const hasBonuses = bonuses.length > 0;
         
@@ -69,7 +69,11 @@
             if (type === 'primary' || type === 'secondary' || type === 'melee') {
                 return true;
             }
-            // Also check for weapon patterns in type
+            // Check if it's armor type (Defensive)
+            if (type === 'defensive') {
+                return true;
+            }
+            // Also check for weapon/armor patterns in type
             if (RANKED_WAR_TYPES.WEAPON.some(t => type.includes(t.toLowerCase())) ||
                 RANKED_WAR_TYPES.ARMOR.some(t => type.includes(t.toLowerCase()))) {
                 return true;
@@ -77,6 +81,18 @@
         }
         
         return false;
+    }
+    
+    // Helper function to determine if item is weapon or armor
+    function isWeapon(item) {
+        const type = (item.type || '').toLowerCase();
+        return type === 'primary' || type === 'secondary' || type === 'melee';
+    }
+    
+    // Helper function to determine if item is armor
+    function isArmor(item) {
+        const type = (item.type || '').toLowerCase();
+        return type === 'defensive';
     }
 
     // Fetch user's item market listings
@@ -144,26 +160,44 @@
                 bonusText = stats.quality.toString();
             }
             
-            // Determine weapon category (Primary, Secondary, Melee)
-            // The API returns type as "Primary", "Secondary", or "Melee" directly
+            // Determine category based on item type
             const itemType = (item.type || '').toLowerCase();
             let category = 'Unknown';
+            let itemCategory = 'Unknown'; // 'Weapon' or 'Armor'
             
-            // Check if type matches directly (case-insensitive)
-            if (itemType === 'primary') {
-                category = 'Primary';
-            } else if (itemType === 'secondary') {
-                category = 'Secondary';
-            } else if (itemType === 'melee') {
-                category = 'Melee';
-            } else if (itemType) {
-                // Fallback: check if type contains the category name
-                if (itemType.includes('primary')) {
+            if (isWeapon(item)) {
+                itemCategory = 'Weapon';
+                // Check if type matches directly (case-insensitive)
+                if (itemType === 'primary') {
                     category = 'Primary';
-                } else if (itemType.includes('secondary')) {
+                } else if (itemType === 'secondary') {
                     category = 'Secondary';
-                } else if (itemType.includes('melee')) {
+                } else if (itemType === 'melee') {
                     category = 'Melee';
+                } else if (itemType) {
+                    // Fallback: check if type contains the category name
+                    if (itemType.includes('primary')) {
+                        category = 'Primary';
+                    } else if (itemType.includes('secondary')) {
+                        category = 'Secondary';
+                    } else if (itemType.includes('melee')) {
+                        category = 'Melee';
+                    }
+                }
+            } else if (isArmor(item)) {
+                itemCategory = 'Armor';
+                // For armor, use the item name to determine category (Body, Boots, Helmet, Gloves, etc.)
+                const itemName = (item.name || '').toLowerCase();
+                if (itemName.includes('body') || itemName.includes('vest') || itemName.includes('chest')) {
+                    category = 'Body';
+                } else if (itemName.includes('boot') || itemName.includes('shoe')) {
+                    category = 'Boots';
+                } else if (itemName.includes('helmet') || itemName.includes('hat') || itemName.includes('cap')) {
+                    category = 'Helmet';
+                } else if (itemName.includes('glove') || itemName.includes('hand')) {
+                    category = 'Gloves';
+                } else {
+                    category = 'Armor';
                 }
             }
             
@@ -185,21 +219,14 @@
                 defense: stats.armor !== undefined ? stats.armor : 'N/A',
                 type: item.type || 'Unknown',
                 category: category,
+                itemCategory: itemCategory, // 'Weapon' or 'Armor'
                 rarity: item.rarity || 'Unknown',
                 available: listing.available || 0
             });
         }
         
-        // Sort by category first (Primary, Secondary, Melee), then by price
-        const categoryOrder = { 'Primary': 1, 'Secondary': 2, 'Melee': 3, 'Unknown': 4 };
-        return marketItems.sort((a, b) => {
-            const catA = categoryOrder[a.category] || 4;
-            const catB = categoryOrder[b.category] || 4;
-            if (catA !== catB) {
-                return catA - catB;
-            }
-            return b.listedPrice - a.listedPrice;
-        });
+        // Return unsorted items - sorting will be done after all pages are collected
+        return marketItems;
     }
 
     // Format number with commas
@@ -236,8 +263,8 @@
         return table;
     }
 
-    // Generate HTML table
-    function generateHTMLTable(items, includeListedPrice = false) {
+    // Generate HTML table for weapons
+    function generateWeaponHTMLTable(items, includeListedPrice = false) {
         let html = '<table style="width: 100%; border-collapse: collapse; margin: 10px 0;">';
         html += '<thead><tr style="background-color: #1a1a1a; border-bottom: 2px solid #d97706;">';
         html += '<th style="padding: 10px; border: 1px solid #444; text-align: left; color: #d97706; font-weight: bold;">Item Name</th>';
@@ -302,9 +329,75 @@
         html += '</tbody></table>';
         return html;
     }
+    
+    // Generate HTML table for armor
+    function generateArmorHTMLTable(items, includeListedPrice = false) {
+        let html = '<table style="width: 100%; border-collapse: collapse; margin: 10px 0;">';
+        html += '<thead><tr style="background-color: #1a1a1a; border-bottom: 2px solid #d97706;">';
+        html += '<th style="padding: 10px; border: 1px solid #444; text-align: left; color: #d97706; font-weight: bold;">Item Name</th>';
+        html += '<th style="padding: 10px; border: 1px solid #444; text-align: center; color: #d97706; font-weight: bold;">Armor/Qual</th>';
+        html += '<th style="padding: 10px; border: 1px solid #444; text-align: center; color: #d97706; font-weight: bold;">Bonus</th>';
+        if (includeListedPrice) {
+            html += '<th style="padding: 10px; border: 1px solid #444; text-align: right; color: #d97706; font-weight: bold;">Listed Price</th>';
+        }
+        html += '<th style="padding: 10px; border: 1px solid #444; text-align: right; color: #d97706; font-weight: bold;">Price</th>';
+        html += '</tr></thead><tbody>';
+        
+        let currentCategory = '';
+        let rowIndex = 0;
+        items.forEach((item) => {
+            // Add category header row if category changed
+            if (item.category !== currentCategory) {
+                currentCategory = item.category;
+                html += `<tr style="background-color: #1a1a1a;">`;
+                html += `<td colspan="${includeListedPrice ? '5' : '4'}" style="padding: 8px; border: 1px solid #444; color: #d97706; font-weight: bold; text-align: center;">${currentCategory}</td>`;
+                html += '</tr>';
+            }
+            
+            const bgColor = rowIndex % 2 === 0 ? '#2d2d2d' : '#353535';
+            rowIndex++;
+            // Format Armor/Qual
+            const armor = item.defense !== 'N/A' ? item.defense : '-';
+            const qual = item.quality !== 'N/A' ? item.quality : '-';
+            
+            // Map rarity to color: yellow, orange, or red
+            let qualityColor = '#f5f5f5'; // default white
+            let rarityLetter = '';
+            const rarity = (item.rarity || '').toLowerCase();
+            if (rarity === 'yellow') {
+                qualityColor = '#fbbf24'; // yellow
+                rarityLetter = 'Y';
+            } else if (rarity === 'orange') {
+                qualityColor = '#fb923c'; // orange
+                rarityLetter = 'O';
+            } else if (rarity === 'red') {
+                qualityColor = '#ef4444'; // red
+                rarityLetter = 'R';
+            }
+            
+            // Format quality with rarity letter suffix
+            const qualDisplay = qual !== '-' ? `${qual}${rarityLetter}` : qual;
+            
+            // Use different colors: armor (green), quality (based on rarity)
+            const statsText = `<span style="color: #10b981; margin-right: 8px;">${armor}</span><span style="color: ${qualityColor};">${qualDisplay}</span>`;
+            
+            html += `<tr style="background-color: ${bgColor}; color: #f5f5f5;">`;
+            html += `<td style="padding: 8px; border: 1px solid #444; color: ${qualityColor};">${item.name}</td>`;
+            html += `<td style="padding: 8px; border: 1px solid #444; text-align: center; color: #f5f5f5;">${statsText}</td>`;
+            html += `<td style="padding: 8px; border: 1px solid #444; text-align: center; color: #f5f5f5;">${item.bonus}</td>`;
+            if (includeListedPrice) {
+                html += `<td style="padding: 8px; border: 1px solid #444; text-align: right; color: #6ee7b7;">$${formatNumber(item.listedPrice)}</td>`;
+            }
+            html += `<td style="padding: 8px; border: 1px solid #444; text-align: right; color: #6ee7b7; font-weight: bold;">$${formatNumber(item.adjustedPrice)}</td>`;
+            html += '</tr>';
+        });
+        
+        html += '</tbody></table>';
+        return html;
+    }
 
     // Create and show modal
-    function showModal(items) {
+    function showModal(weapons, armor) {
         // Remove existing modal if present
         const existingModal = document.getElementById('rw-market-modal');
         if (existingModal) {
@@ -345,8 +438,66 @@
         const header = document.createElement('div');
         header.style.cssText = 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;';
         const title = document.createElement('h2');
-        title.textContent = `Ranked War Market Items (${items.length})`;
+        const totalItems = weapons.length + armor.length;
+        title.textContent = `Ranked War Market Items (${totalItems})`;
         title.style.cssText = 'margin: 0; color: #d97706; font-weight: bold;';
+        
+        // Tab container
+        const tabContainer = document.createElement('div');
+        tabContainer.style.cssText = 'display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #444;';
+        
+        let activeTab = 'weapons'; // Default to weapons
+        
+        const weaponsTab = document.createElement('button');
+        weaponsTab.textContent = `⚔️ Weapons (${weapons.length})`;
+        weaponsTab.style.cssText = `
+            padding: 10px 20px;
+            background-color: ${activeTab === 'weapons' ? '#d97706' : '#444'};
+            color: ${activeTab === 'weapons' ? '#ffffff' : '#d97706'};
+            border: none;
+            border-bottom: ${activeTab === 'weapons' ? '3px solid #d97706' : '3px solid transparent'};
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            transition: all 0.2s;
+        `;
+        weaponsTab.onclick = () => {
+            activeTab = 'weapons';
+            weaponsTab.style.backgroundColor = '#d97706';
+            weaponsTab.style.color = '#ffffff';
+            weaponsTab.style.borderBottom = '3px solid #d97706';
+            armorTab.style.backgroundColor = '#444';
+            armorTab.style.color = '#d97706';
+            armorTab.style.borderBottom = '3px solid transparent';
+            updateTable();
+        };
+        
+        const armorTab = document.createElement('button');
+        armorTab.textContent = `🛡️ Armor (${armor.length})`;
+        armorTab.style.cssText = `
+            padding: 10px 20px;
+            background-color: ${activeTab === 'armor' ? '#d97706' : '#444'};
+            color: ${activeTab === 'armor' ? '#ffffff' : '#d97706'};
+            border: none;
+            border-bottom: ${activeTab === 'armor' ? '3px solid #d97706' : '3px solid transparent'};
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            transition: all 0.2s;
+        `;
+        armorTab.onclick = () => {
+            activeTab = 'armor';
+            armorTab.style.backgroundColor = '#d97706';
+            armorTab.style.color = '#ffffff';
+            armorTab.style.borderBottom = '3px solid #d97706';
+            weaponsTab.style.backgroundColor = '#444';
+            weaponsTab.style.color = '#d97706';
+            weaponsTab.style.borderBottom = '3px solid transparent';
+            updateTable();
+        };
+        
+        tabContainer.appendChild(weaponsTab);
+        tabContainer.appendChild(armorTab);
         
         const closeBtn = document.createElement('button');
         closeBtn.textContent = '×';
@@ -431,12 +582,23 @@
         const updateTable = () => {
             const discountPercent = parseFloat(discountInput.value) || 0;
             const discount = discountPercent / 100;
-            // Recalculate adjusted prices with new discount
-            const itemsWithDiscount = items.map(item => ({
-                ...item,
-                adjustedPrice: Math.floor(item.listedPrice * (1 - discount))
-            }));
-            tableContainer.innerHTML = generateHTMLTable(itemsWithDiscount, includeListedPriceCheckbox.checked);
+            const includeListedPrice = includeListedPriceCheckbox.checked;
+            
+            if (activeTab === 'weapons') {
+                // Recalculate adjusted prices with new discount
+                const itemsWithDiscount = weapons.map(item => ({
+                    ...item,
+                    adjustedPrice: Math.floor(item.listedPrice * (1 - discount))
+                }));
+                tableContainer.innerHTML = generateWeaponHTMLTable(itemsWithDiscount, includeListedPrice);
+            } else {
+                // Recalculate adjusted prices with new discount
+                const itemsWithDiscount = armor.map(item => ({
+                    ...item,
+                    adjustedPrice: Math.floor(item.listedPrice * (1 - discount))
+                }));
+                tableContainer.innerHTML = generateArmorHTMLTable(itemsWithDiscount, includeListedPrice);
+            }
         };
         updateTable();
         includeListedPriceCheckbox.addEventListener('change', updateTable);
@@ -471,12 +633,22 @@
         copyHTMLBtn.onclick = () => {
             const discountPercent = parseFloat(discountInput.value) || 0;
             const discount = discountPercent / 100;
-            // Recalculate adjusted prices with current discount
-            const itemsWithDiscount = items.map(item => ({
-                ...item,
-                adjustedPrice: Math.floor(item.listedPrice * (1 - discount))
-            }));
-            const html = generateHTMLTable(itemsWithDiscount, includeListedPriceCheckbox.checked);
+            const includeListedPrice = includeListedPriceCheckbox.checked;
+            
+            let html;
+            if (activeTab === 'weapons') {
+                const itemsWithDiscount = weapons.map(item => ({
+                    ...item,
+                    adjustedPrice: Math.floor(item.listedPrice * (1 - discount))
+                }));
+                html = generateWeaponHTMLTable(itemsWithDiscount, includeListedPrice);
+            } else {
+                const itemsWithDiscount = armor.map(item => ({
+                    ...item,
+                    adjustedPrice: Math.floor(item.listedPrice * (1 - discount))
+                }));
+                html = generateArmorHTMLTable(itemsWithDiscount, includeListedPrice);
+            }
             GM_setClipboard(html, 'text');
             copyHTMLBtn.textContent = 'Copied!';
             setTimeout(() => {
@@ -509,29 +681,52 @@
         copyCSVBtn.onclick = () => {
             const discountPercent = parseFloat(discountInput.value) || 0;
             const discount = discountPercent / 100;
+            const includeListedPrice = includeListedPriceCheckbox.checked;
             
-            let csv = 'Item Name,Dmg/Acc/Qual,Bonus';
-            if (includeListedPriceCheckbox.checked) {
-                csv += ',Listed Price';
-            }
-            csv += ',Price\n';
+            const currentItems = activeTab === 'weapons' ? weapons : armor;
             
-            items.forEach(item => {
-                const dmg = item.damage !== 'N/A' ? item.damage : '-';
-                const acc = item.accuracy !== 'N/A' ? item.accuracy : '-';
-                const qual = item.quality !== 'N/A' ? item.quality : '-';
-                // CSV format: keep simple with spaces for readability
-                const statsText = `${dmg} / ${acc} / ${qual}`;
-                
-                // Calculate adjusted price with current discount
-                const adjustedPrice = Math.floor(item.listedPrice * (1 - discount));
-                
-                csv += `"${item.name}","${statsText}","${item.bonus}"`;
-                if (includeListedPriceCheckbox.checked) {
-                    csv += `,${item.listedPrice}`;
+            let csv;
+            if (activeTab === 'weapons') {
+                csv = 'Item Name,Dmg/Acc/Qual,Bonus';
+                if (includeListedPrice) {
+                    csv += ',Listed Price';
                 }
-                csv += `,${adjustedPrice}\n`;
-            });
+                csv += ',Price\n';
+                
+                currentItems.forEach(item => {
+                    const dmg = item.damage !== 'N/A' ? item.damage : '-';
+                    const acc = item.accuracy !== 'N/A' ? item.accuracy : '-';
+                    const qual = item.quality !== 'N/A' ? item.quality : '-';
+                    const statsText = `${dmg} / ${acc} / ${qual}`;
+                    const adjustedPrice = Math.floor(item.listedPrice * (1 - discount));
+                    
+                    csv += `"${item.name}","${statsText}","${item.bonus}"`;
+                    if (includeListedPrice) {
+                        csv += `,${item.listedPrice}`;
+                    }
+                    csv += `,${adjustedPrice}\n`;
+                });
+            } else {
+                csv = 'Item Name,Armor/Qual,Bonus';
+                if (includeListedPrice) {
+                    csv += ',Listed Price';
+                }
+                csv += ',Price\n';
+                
+                currentItems.forEach(item => {
+                    const armor = item.defense !== 'N/A' ? item.defense : '-';
+                    const qual = item.quality !== 'N/A' ? item.quality : '-';
+                    const statsText = `${armor} / ${qual}`;
+                    const adjustedPrice = Math.floor(item.listedPrice * (1 - discount));
+                    
+                    csv += `"${item.name}","${statsText}","${item.bonus}"`;
+                    if (includeListedPrice) {
+                        csv += `,${item.listedPrice}`;
+                    }
+                    csv += `,${adjustedPrice}\n`;
+                });
+            }
+            
             GM_setClipboard(csv, 'text');
             copyCSVBtn.textContent = 'Copied!';
             setTimeout(() => {
@@ -572,6 +767,7 @@
 
         // Assemble modal
         modal.appendChild(header);
+        modal.appendChild(tabContainer);
         modal.appendChild(optionsContainer);
         modal.appendChild(tableContainer);
         modal.appendChild(buttonsContainer);
@@ -629,14 +825,40 @@
                 }
             }
             
+            // Separate weapons and armor
+            const weapons = allItems.filter(item => item.itemCategory === 'Weapon');
+            const armor = allItems.filter(item => item.itemCategory === 'Armor');
+            
+            // Sort weapons by category first (Primary, Secondary, Melee), then by price
+            const weaponCategoryOrder = { 'Primary': 1, 'Secondary': 2, 'Melee': 3, 'Unknown': 4 };
+            weapons.sort((a, b) => {
+                const catA = weaponCategoryOrder[a.category] || 4;
+                const catB = weaponCategoryOrder[b.category] || 4;
+                if (catA !== catB) {
+                    return catA - catB;
+                }
+                return b.listedPrice - a.listedPrice;
+            });
+            
+            // Sort armor by category first (Body, Boots, Helmet, Gloves), then by price
+            const armorCategoryOrder = { 'Body': 1, 'Boots': 2, 'Helmet': 3, 'Gloves': 4, 'Armor': 5, 'Unknown': 6 };
+            armor.sort((a, b) => {
+                const catA = armorCategoryOrder[a.category] || 6;
+                const catB = armorCategoryOrder[b.category] || 6;
+                if (catA !== catB) {
+                    return catA - catB;
+                }
+                return b.listedPrice - a.listedPrice;
+            });
+            
             loadingMsg.remove();
             
-            if (allItems.length === 0) {
+            if (weapons.length === 0 && armor.length === 0) {
                 alert('No ranked war weapons or armor found on the item market.');
                 return;
             }
             
-            showModal(allItems);
+            showModal(weapons, armor);
         } catch (error) {
             console.error('Error fetching item market:', error);
             alert('Error loading item market data: ' + error.message);
