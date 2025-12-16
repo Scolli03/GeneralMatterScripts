@@ -164,6 +164,7 @@
             const itemType = (item.type || '').toLowerCase();
             let category = 'Unknown';
             let itemCategory = 'Unknown'; // 'Weapon' or 'Armor'
+            let armorSet = 'N/A'; // Initialize for all items, will be set for armor items
             
             if (isWeapon(item)) {
                 itemCategory = 'Weapon';
@@ -186,8 +187,36 @@
                 }
             } else if (isArmor(item)) {
                 itemCategory = 'Armor';
-                // For armor, use the item name to determine category (Body, Boots, Helmet, Gloves, etc.)
+                // For armor, use the item name to determine category (Body, Boots, Helmet, Gloves, Pants, etc.)
                 const itemName = (item.name || '').toLowerCase();
+                armorSet = 'Unknown'; // Reset for armor items
+                
+                // Extract armor set name (Assault, Riot, etc.)
+                const itemNameOriginal = (item.name || '');
+                if (itemNameOriginal.toLowerCase().includes('assault')) {
+                    armorSet = 'Assault';
+                } else if (itemNameOriginal.toLowerCase().includes('riot')) {
+                    armorSet = 'Riot';
+                } else if (itemNameOriginal.toLowerCase().includes('dune')) {
+                    armorSet = 'Dune';
+                } else if (itemNameOriginal.toLowerCase().includes('tactical')) {
+                    armorSet = 'Tactical';
+                } else if (itemNameOriginal.toLowerCase().includes('combat')) {
+                    armorSet = 'Combat';
+                } else if (itemNameOriginal.toLowerCase().includes('military')) {
+                    armorSet = 'Military';
+                } else if (itemNameOriginal.toLowerCase().includes('stealth')) {
+                    armorSet = 'Stealth';
+                } else if (itemNameOriginal.toLowerCase().includes('urban')) {
+                    armorSet = 'Urban';
+                } else if (itemNameOriginal.toLowerCase().includes('desert')) {
+                    armorSet = 'Desert';
+                } else if (itemNameOriginal.toLowerCase().includes('arctic')) {
+                    armorSet = 'Arctic';
+                } else if (itemNameOriginal.toLowerCase().includes('jungle')) {
+                    armorSet = 'Jungle';
+                }
+                
                 if (itemName.includes('body') || itemName.includes('vest') || itemName.includes('chest')) {
                     category = 'Body';
                 } else if (itemName.includes('boot') || itemName.includes('shoe')) {
@@ -196,6 +225,8 @@
                     category = 'Helmet';
                 } else if (itemName.includes('glove') || itemName.includes('hand')) {
                     category = 'Gloves';
+                } else if (itemName.includes('pant') || itemName.includes('trouser') || itemName.includes('leg')) {
+                    category = 'Pants';
                 } else {
                     category = 'Armor';
                 }
@@ -219,6 +250,7 @@
                 defense: stats.armor !== undefined ? stats.armor : 'N/A',
                 type: item.type || 'Unknown',
                 category: category,
+                armorSet: armorSet, // Store armor set name (N/A for weapons, set name or Unknown for armor)
                 itemCategory: itemCategory, // 'Weapon' or 'Armor'
                 rarity: item.rarity || 'Unknown',
                 available: listing.available || 0
@@ -331,7 +363,7 @@
     }
     
     // Generate HTML table for armor
-    function generateArmorHTMLTable(items, includeListedPrice = false) {
+    function generateArmorHTMLTable(items, includeListedPrice = false, sortBy = 'type') {
         let html = '<table style="width: 100%; border-collapse: collapse; margin: 10px 0;">';
         html += '<thead><tr style="background-color: #1a1a1a; border-bottom: 2px solid #d97706;">';
         html += '<th style="padding: 10px; border: 1px solid #444; text-align: left; color: #d97706; font-weight: bold;">Item Name</th>';
@@ -343,14 +375,17 @@
         html += '<th style="padding: 10px; border: 1px solid #444; text-align: right; color: #d97706; font-weight: bold;">Price</th>';
         html += '</tr></thead><tbody>';
         
-        let currentCategory = '';
+        let currentHeader = '';
         let rowIndex = 0;
         items.forEach((item) => {
-            // Add category header row if category changed
-            if (item.category !== currentCategory) {
-                currentCategory = item.category;
+            // Determine header based on sort mode
+            const headerValue = sortBy === 'set' ? item.armorSet : item.category;
+            
+            // Add category/set header row if changed
+            if (headerValue !== currentHeader) {
+                currentHeader = headerValue;
                 html += `<tr style="background-color: #1a1a1a;">`;
-                html += `<td colspan="${includeListedPrice ? '5' : '4'}" style="padding: 8px; border: 1px solid #444; color: #d97706; font-weight: bold; text-align: center;">${currentCategory}</td>`;
+                html += `<td colspan="${includeListedPrice ? '5' : '4'}" style="padding: 8px; border: 1px solid #444; color: #d97706; font-weight: bold; text-align: center;">${currentHeader}</td>`;
                 html += '</tr>';
             }
             
@@ -469,7 +504,6 @@
             armorTab.style.backgroundColor = '#444';
             armorTab.style.color = '#d97706';
             armorTab.style.borderBottom = '3px solid transparent';
-            updateTable();
         };
         
         const armorTab = document.createElement('button');
@@ -493,7 +527,6 @@
             weaponsTab.style.backgroundColor = '#444';
             weaponsTab.style.color = '#d97706';
             weaponsTab.style.borderBottom = '3px solid transparent';
-            updateTable();
         };
         
         tabContainer.appendChild(weaponsTab);
@@ -574,15 +607,70 @@
         checkboxRow.appendChild(includeListedPriceCheckbox);
         checkboxRow.appendChild(checkboxLabel);
         
+        // Armor sort mode toggle (only visible when armor tab is active)
+        const armorSortRow = document.createElement('div');
+        armorSortRow.id = 'armor-sort-row';
+        armorSortRow.style.cssText = 'display: none; flex-direction: column; gap: 10px; padding: 10px; background-color: #2d2d2d; border-radius: 5px;';
+        
+        const armorSortLabel = document.createElement('span');
+        armorSortLabel.textContent = 'Sort Armor By:';
+        armorSortLabel.style.cssText = 'color: #f5f5f5; font-weight: bold;';
+        
+        const armorSortOptions = document.createElement('div');
+        armorSortOptions.style.cssText = 'display: flex; gap: 20px; align-items: center;';
+        
+        const sortByTypeRadio = document.createElement('input');
+        sortByTypeRadio.type = 'radio';
+        sortByTypeRadio.name = 'armor-sort';
+        sortByTypeRadio.id = 'sort-by-type';
+        sortByTypeRadio.value = 'type';
+        sortByTypeRadio.checked = true; // Default to type
+        sortByTypeRadio.style.cssText = 'width: 18px; height: 18px; cursor: pointer;';
+        
+        const sortByTypeLabel = document.createElement('label');
+        sortByTypeLabel.htmlFor = 'sort-by-type';
+        sortByTypeLabel.textContent = 'Type (Body, Boots, etc.)';
+        sortByTypeLabel.style.cssText = 'color: #f5f5f5; cursor: pointer; user-select: none;';
+        
+        const sortBySetRadio = document.createElement('input');
+        sortBySetRadio.type = 'radio';
+        sortBySetRadio.name = 'armor-sort';
+        sortBySetRadio.id = 'sort-by-set';
+        sortBySetRadio.value = 'set';
+        sortBySetRadio.style.cssText = 'width: 18px; height: 18px; cursor: pointer;';
+        
+        const sortBySetLabel = document.createElement('label');
+        sortBySetLabel.htmlFor = 'sort-by-set';
+        sortBySetLabel.textContent = 'Set (Assault, Riot, etc.)';
+        sortBySetLabel.style.cssText = 'color: #f5f5f5; cursor: pointer; user-select: none;';
+        
+        armorSortOptions.appendChild(sortByTypeRadio);
+        armorSortOptions.appendChild(sortByTypeLabel);
+        armorSortOptions.appendChild(sortBySetRadio);
+        armorSortOptions.appendChild(sortBySetLabel);
+        
+        armorSortRow.appendChild(armorSortLabel);
+        armorSortRow.appendChild(armorSortOptions);
+        
         optionsContainer.appendChild(discountRow);
         optionsContainer.appendChild(checkboxRow);
+        optionsContainer.appendChild(armorSortRow);
 
         // Table container
         const tableContainer = document.createElement('div');
+        let armorSortMode = 'type'; // Default to sorting by type
+        
         const updateTable = () => {
             const discountPercent = parseFloat(discountInput.value) || 0;
             const discount = discountPercent / 100;
             const includeListedPrice = includeListedPriceCheckbox.checked;
+            
+            // Show/hide armor sort options based on active tab
+            if (activeTab === 'armor') {
+                armorSortRow.style.display = 'flex';
+            } else {
+                armorSortRow.style.display = 'none';
+            }
             
             if (activeTab === 'weapons') {
                 // Recalculate adjusted prices with new discount
@@ -592,17 +680,58 @@
                 }));
                 tableContainer.innerHTML = generateWeaponHTMLTable(itemsWithDiscount, includeListedPrice);
             } else {
+                // Get current sort mode
+                armorSortMode = document.querySelector('input[name="armor-sort"]:checked')?.value || 'type';
+                
+                // Sort armor based on selected mode
+                let sortedArmor = [...armor];
+                if (armorSortMode === 'set') {
+                    // Sort by set first, then by type within set, then by price
+                    const setOrder = { 'Assault': 1, 'Riot': 2, 'Dune': 3, 'Tactical': 4, 'Combat': 5, 'Military': 6, 'Stealth': 7, 'Urban': 8, 'Desert': 9, 'Arctic': 10, 'Jungle': 11, 'Unknown': 12 };
+                    const typeOrder = { 'Body': 1, 'Boots': 2, 'Helmet': 3, 'Gloves': 4, 'Pants': 5, 'Armor': 6 };
+                    sortedArmor.sort((a, b) => {
+                        const setA = setOrder[a.armorSet] || 12;
+                        const setB = setOrder[b.armorSet] || 12;
+                        if (setA !== setB) {
+                            return setA - setB;
+                        }
+                        const typeA = typeOrder[a.category] || 6;
+                        const typeB = typeOrder[b.category] || 6;
+                        if (typeA !== typeB) {
+                            return typeA - typeB;
+                        }
+                        return b.listedPrice - a.listedPrice;
+                    });
+                } else {
+                    // Sort by type (already sorted in main function, but recalculate prices)
+                }
+                
                 // Recalculate adjusted prices with new discount
-                const itemsWithDiscount = armor.map(item => ({
+                const itemsWithDiscount = sortedArmor.map(item => ({
                     ...item,
                     adjustedPrice: Math.floor(item.listedPrice * (1 - discount))
                 }));
-                tableContainer.innerHTML = generateArmorHTMLTable(itemsWithDiscount, includeListedPrice);
+                tableContainer.innerHTML = generateArmorHTMLTable(itemsWithDiscount, includeListedPrice, armorSortMode);
             }
         };
         updateTable();
+        // Wrap tab click handlers to call updateTable
+        const originalWeaponsClick = weaponsTab.onclick;
+        weaponsTab.onclick = () => {
+            if (originalWeaponsClick) originalWeaponsClick();
+            updateTable();
+        };
+        
+        const originalArmorClick = armorTab.onclick;
+        armorTab.onclick = () => {
+            if (originalArmorClick) originalArmorClick();
+            updateTable();
+        };
+        
         includeListedPriceCheckbox.addEventListener('change', updateTable);
         discountInput.addEventListener('input', updateTable);
+        sortByTypeRadio.addEventListener('change', updateTable);
+        sortBySetRadio.addEventListener('change', updateTable);
 
         // Buttons container
         const buttonsContainer = document.createElement('div');
@@ -643,11 +772,34 @@
                 }));
                 html = generateWeaponHTMLTable(itemsWithDiscount, includeListedPrice);
             } else {
-                const itemsWithDiscount = armor.map(item => ({
+                // Get current sort mode
+                const currentSortMode = document.querySelector('input[name="armor-sort"]:checked')?.value || 'type';
+                
+                // Sort armor based on selected mode (same logic as updateTable)
+                let sortedArmor = [...armor];
+                if (currentSortMode === 'set') {
+                    const setOrder = { 'Assault': 1, 'Riot': 2, 'Dune': 3, 'Tactical': 4, 'Combat': 5, 'Military': 6, 'Stealth': 7, 'Urban': 8, 'Desert': 9, 'Arctic': 10, 'Jungle': 11, 'Unknown': 12 };
+                    const typeOrder = { 'Body': 1, 'Boots': 2, 'Helmet': 3, 'Gloves': 4, 'Pants': 5, 'Armor': 6 };
+                    sortedArmor.sort((a, b) => {
+                        const setA = setOrder[a.armorSet] || 12;
+                        const setB = setOrder[b.armorSet] || 12;
+                        if (setA !== setB) {
+                            return setA - setB;
+                        }
+                        const typeA = typeOrder[a.category] || 6;
+                        const typeB = typeOrder[b.category] || 6;
+                        if (typeA !== typeB) {
+                            return typeA - typeB;
+                        }
+                        return b.listedPrice - a.listedPrice;
+                    });
+                }
+                
+                const itemsWithDiscount = sortedArmor.map(item => ({
                     ...item,
                     adjustedPrice: Math.floor(item.listedPrice * (1 - discount))
                 }));
-                html = generateArmorHTMLTable(itemsWithDiscount, includeListedPrice);
+                html = generateArmorHTMLTable(itemsWithDiscount, includeListedPrice, currentSortMode);
             }
             GM_setClipboard(html, 'text');
             copyHTMLBtn.textContent = 'Copied!';
@@ -683,8 +835,6 @@
             const discount = discountPercent / 100;
             const includeListedPrice = includeListedPriceCheckbox.checked;
             
-            const currentItems = activeTab === 'weapons' ? weapons : armor;
-            
             let csv;
             if (activeTab === 'weapons') {
                 csv = 'Item Name,Dmg/Acc/Qual,Bonus';
@@ -693,7 +843,7 @@
                 }
                 csv += ',Price\n';
                 
-                currentItems.forEach(item => {
+                weapons.forEach(item => {
                     const dmg = item.damage !== 'N/A' ? item.damage : '-';
                     const acc = item.accuracy !== 'N/A' ? item.accuracy : '-';
                     const qual = item.quality !== 'N/A' ? item.quality : '-';
@@ -707,13 +857,34 @@
                     csv += `,${adjustedPrice}\n`;
                 });
             } else {
+                // Get current sort mode and sort armor accordingly
+                const currentSortMode = document.querySelector('input[name="armor-sort"]:checked')?.value || 'type';
+                let sortedArmor = [...armor];
+                if (currentSortMode === 'set') {
+                    const setOrder = { 'Assault': 1, 'Riot': 2, 'Dune': 3, 'Tactical': 4, 'Combat': 5, 'Military': 6, 'Stealth': 7, 'Urban': 8, 'Desert': 9, 'Arctic': 10, 'Jungle': 11, 'Unknown': 12 };
+                    const typeOrder = { 'Body': 1, 'Boots': 2, 'Helmet': 3, 'Gloves': 4, 'Pants': 5, 'Armor': 6 };
+                    sortedArmor.sort((a, b) => {
+                        const setA = setOrder[a.armorSet] || 12;
+                        const setB = setOrder[b.armorSet] || 12;
+                        if (setA !== setB) {
+                            return setA - setB;
+                        }
+                        const typeA = typeOrder[a.category] || 6;
+                        const typeB = typeOrder[b.category] || 6;
+                        if (typeA !== typeB) {
+                            return typeA - typeB;
+                        }
+                        return b.listedPrice - a.listedPrice;
+                    });
+                }
+                
                 csv = 'Item Name,Armor/Qual,Bonus';
                 if (includeListedPrice) {
                     csv += ',Listed Price';
                 }
                 csv += ',Price\n';
                 
-                currentItems.forEach(item => {
+                sortedArmor.forEach(item => {
                     const armor = item.defense !== 'N/A' ? item.defense : '-';
                     const qual = item.quality !== 'N/A' ? item.quality : '-';
                     const statsText = `${armor} / ${qual}`;
@@ -840,8 +1011,9 @@
                 return b.listedPrice - a.listedPrice;
             });
             
-            // Sort armor by category first (Body, Boots, Helmet, Gloves), then by price
-            const armorCategoryOrder = { 'Body': 1, 'Boots': 2, 'Helmet': 3, 'Gloves': 4, 'Armor': 5, 'Unknown': 6 };
+            // Sort armor by category first (Body, Boots, Helmet, Gloves, Pants), then by price
+            // This is the default "by type" sorting - will be re-sorted if user selects "by set"
+            const armorCategoryOrder = { 'Body': 1, 'Boots': 2, 'Helmet': 3, 'Gloves': 4, 'Pants': 5, 'Armor': 6, 'Unknown': 7 };
             armor.sort((a, b) => {
                 const catA = armorCategoryOrder[a.category] || 6;
                 const catB = armorCategoryOrder[b.category] || 6;
