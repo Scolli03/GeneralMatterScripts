@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ranked War Market Lister
 // @namespace    http://tampermonkey.net/
-// @version      1.0.0
+// @version      1.7.2
 // @description  Lists all current user's ranked war weapons/armor from item market with stats and prices
 // @author       Scolli03[3150751]
 // @match        https://www.torn.com/*
