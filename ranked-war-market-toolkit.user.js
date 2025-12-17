@@ -1304,6 +1304,52 @@
 
     // ========== CACHE PRICES FUNCTIONS ==========
 
+    // Helper function to fetch cache prices for a faction
+    async function fetchFactionCachePrices(faction, loadingMsg) {
+        const cacheItems = faction.rewards?.items || [];
+        if (cacheItems.length === 0) {
+            return [];
+        }
+
+        const cacheData = [];
+        for (const item of cacheItems) {
+            try {
+                const priceData = await fetchItemPrice(item.id);
+                const listings = priceData.listings || [];
+                if (listings.length > 0) {
+                    const cheapest = listings.sort((a, b) => a.price - b.price)[0];
+                    cacheData.push({
+                        id: item.id,
+                        name: item.name,
+                        quantity: item.quantity,
+                        cheapestPrice: cheapest.price,
+                        listing: cheapest
+                    });
+                } else {
+                    cacheData.push({
+                        id: item.id,
+                        name: item.name,
+                        quantity: item.quantity,
+                        cheapestPrice: priceData.market_price || 0,
+                        listing: null
+                    });
+                }
+                await new Promise(resolve => setTimeout(resolve, 200));
+            } catch (error) {
+                console.error(`Error fetching price for ${item.name}:`, error);
+                cacheData.push({
+                    id: item.id,
+                    name: item.name,
+                    quantity: item.quantity,
+                    cheapestPrice: 0,
+                    listing: null,
+                    error: error.message
+                });
+            }
+        }
+        return cacheData;
+    }
+
     // Main function for cache prices
     async function mainCachePrices() {
         const rankID = getRankID();
@@ -1334,63 +1380,26 @@
             const warData = await fetchWarReport(rankID);
             const report = warData.rankedwarreport;
             
-            if (!report || !report.factions) {
-                throw new Error('Invalid war report data');
+            if (!report || !report.factions || report.factions.length < 2) {
+                throw new Error('Invalid war report data - need at least 2 factions');
             }
 
             const winnerFaction = report.factions.find(f => f.id === report.winner);
-            if (!winnerFaction) {
-                throw new Error('Could not find winner faction');
+            const loserFaction = report.factions.find(f => f.id !== report.winner);
+            
+            if (!winnerFaction || !loserFaction) {
+                throw new Error('Could not find both factions');
             }
 
-            const cacheItems = winnerFaction.rewards?.items || [];
-            if (cacheItems.length === 0) {
-                loadingMsg.textContent = 'No cache rewards found for winner';
-                setTimeout(() => loadingMsg.remove(), 3000);
-                return;
-            }
-
-            loadingMsg.textContent = 'Fetching cache prices...';
-
-            const cacheData = [];
-            for (const item of cacheItems) {
-                try {
-                    const priceData = await fetchItemPrice(item.id);
-                    const listings = priceData.listings || [];
-                    if (listings.length > 0) {
-                        const cheapest = listings.sort((a, b) => a.price - b.price)[0];
-                        cacheData.push({
-                            id: item.id,
-                            name: item.name,
-                            quantity: item.quantity,
-                            cheapestPrice: cheapest.price,
-                            listing: cheapest
-                        });
-                    } else {
-                        cacheData.push({
-                            id: item.id,
-                            name: item.name,
-                            quantity: item.quantity,
-                            cheapestPrice: priceData.market_price || 0,
-                            listing: null
-                        });
-                    }
-                    await new Promise(resolve => setTimeout(resolve, 200));
-                } catch (error) {
-                    console.error(`Error fetching price for ${item.name}:`, error);
-                    cacheData.push({
-                        id: item.id,
-                        name: item.name,
-                        quantity: item.quantity,
-                        cheapestPrice: 0,
-                        listing: null,
-                        error: error.message
-                    });
-                }
-            }
+            // Fetch cache prices for both factions
+            loadingMsg.textContent = 'Fetching cache prices for winner...';
+            const winnerCacheData = await fetchFactionCachePrices(winnerFaction, loadingMsg);
+            
+            loadingMsg.textContent = 'Fetching cache prices for loser...';
+            const loserCacheData = await fetchFactionCachePrices(loserFaction, loadingMsg);
 
             loadingMsg.remove();
-            showCacheResults(winnerFaction, cacheData);
+            showCacheResults(report, winnerFaction, winnerCacheData, loserFaction, loserCacheData);
         } catch (error) {
             console.error('Error fetching war data:', error);
             alert('Error loading war data: ' + error.message);
@@ -1399,8 +1408,8 @@
         }
     }
 
-    // Show cache results modal (combined prices and buy quote)
-    function showCacheResults(winnerFaction, cacheData) {
+    // Show cache results modal (buy quote only, both factions)
+    function showCacheResults(report, winnerFaction, winnerCacheData, loserFaction, loserCacheData) {
         const existingModal = document.getElementById('rw-cache-modal');
         if (existingModal) {
             existingModal.remove();
@@ -1437,7 +1446,7 @@
         const header = document.createElement('div');
         header.style.cssText = 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; gap: 20px;';
         const title = document.createElement('h2');
-        title.textContent = `War Cache Prices & Buy Quote - ${winnerFaction.name}`;
+        title.textContent = 'War Cache Buy Quotes';
         title.style.cssText = 'margin: 0; color: #d97706; font-weight: bold; flex: 1;';
         
         const closeBtn = document.createElement('button');
@@ -1459,47 +1468,45 @@
         header.appendChild(title);
         header.appendChild(closeBtn);
 
-        // Mail defaults helpers
-        const getMailDefaults = () => {
-            const stored = localStorage.getItem('rwToolkitMailDefaults');
-            if (stored) {
-                try { return JSON.parse(stored); } catch (e) { /* ignore */ }
-            }
-            return {
-                subject: 'War Cache Purchase',
-                message: 'Hey, I can buy your war caches for the following price:'
-            };
-        };
-        const saveMailDefaults = (subject, message) => {
-            localStorage.setItem('rwToolkitMailDefaults', JSON.stringify({ subject, message }));
-        };
-
         // Options container
         const optionsContainer = document.createElement('div');
         optionsContainer.style.cssText = 'margin-bottom: 20px; padding: 15px; background-color: #1a1a1a; border-radius: 4px; border: 1px solid #444;';
         
-        // Mode toggle (Prices vs Buy Quote)
-        const modeRow = document.createElement('div');
-        modeRow.style.cssText = 'display: flex; align-items: center; gap: 15px; margin-bottom: 15px;';
+        // Faction toggle
+        const factionRow = document.createElement('div');
+        factionRow.style.cssText = 'display: flex; align-items: center; gap: 15px; margin-bottom: 15px;';
         
-        const modeLabel = document.createElement('label');
-        modeLabel.textContent = 'Mode:';
-        modeLabel.style.cssText = 'color: #f5f5f5; font-weight: bold; min-width: 80px;';
+        const factionLabel = document.createElement('label');
+        factionLabel.textContent = 'Faction:';
+        factionLabel.style.cssText = 'color: #f5f5f5; font-weight: bold; min-width: 80px;';
         
-        const showBuyQuoteCheckbox = document.createElement('input');
-        showBuyQuoteCheckbox.type = 'checkbox';
-        showBuyQuoteCheckbox.id = 'show-buy-quote';
-        showBuyQuoteCheckbox.checked = false;
-        showBuyQuoteCheckbox.style.cssText = 'width: 18px; height: 18px; cursor: pointer;';
+        const factionSelect = document.createElement('select');
+        factionSelect.id = 'faction-select';
+        factionSelect.style.cssText = `
+            flex: 1;
+            padding: 8px;
+            background-color: #353535;
+            color: #f5f5f5;
+            border: 1px solid #444;
+            border-radius: 4px;
+            font-size: 14px;
+            cursor: pointer;
+        `;
         
-        const modeCheckboxLabel = document.createElement('label');
-        modeCheckboxLabel.htmlFor = 'show-buy-quote';
-        modeCheckboxLabel.textContent = 'Show Buy Quote (instead of prices)';
-        modeCheckboxLabel.style.cssText = 'color: #f5f5f5; cursor: pointer; user-select: none;';
+        const winnerOption = document.createElement('option');
+        winnerOption.value = 'winner';
+        winnerOption.textContent = `${winnerFaction.name} (Winner)`;
+        winnerOption.selected = true;
         
-        modeRow.appendChild(modeLabel);
-        modeRow.appendChild(showBuyQuoteCheckbox);
-        modeRow.appendChild(modeCheckboxLabel);
+        const loserOption = document.createElement('option');
+        loserOption.value = 'loser';
+        loserOption.textContent = `${loserFaction.name} (Loser)`;
+        
+        factionSelect.appendChild(winnerOption);
+        factionSelect.appendChild(loserOption);
+        
+        factionRow.appendChild(factionLabel);
+        factionRow.appendChild(factionSelect);
         
         // Discount input (for buy quote)
         const discountRow = document.createElement('div');
@@ -1564,237 +1571,164 @@
         marginRow.appendChild(marginInput);
         marginRow.appendChild(marginUnitLabel);
         
-        // Mail subject/message defaults
-        const mailDefaults = getMailDefaults();
-        const subjectRow = document.createElement('div');
-        subjectRow.style.cssText = 'display: flex; align-items: center; gap: 10px; margin-bottom: 10px;';
-        const subjectLabel = document.createElement('label');
-        subjectLabel.textContent = 'Mail subject:';
-        subjectLabel.style.cssText = 'color: #f5f5f5; font-weight: bold; min-width: 120px;';
-        const subjectInput = document.createElement('input');
-        subjectInput.type = 'text';
-        subjectInput.value = mailDefaults.subject;
-        subjectInput.style.cssText = 'flex: 1; padding: 6px; background-color: #353535; color: #f5f5f5; border: 1px solid #444; border-radius: 4px;';
-        subjectRow.appendChild(subjectLabel);
-        subjectRow.appendChild(subjectInput);
-
-        const messageRow = document.createElement('div');
-        messageRow.style.cssText = 'display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px;';
-        const messageLabel = document.createElement('label');
-        messageLabel.textContent = 'Mail message (text before table):';
-        messageLabel.style.cssText = 'color: #f5f5f5; font-weight: bold;';
-        const messageInput = document.createElement('textarea');
-        messageInput.value = mailDefaults.message;
-        messageInput.rows = 3;
-        messageInput.style.cssText = 'width: 100%; padding: 6px; background-color: #353535; color: #f5f5f5; border: 1px solid #444; border-radius: 4px;';
-        messageRow.appendChild(messageLabel);
-        messageRow.appendChild(messageInput);
-
-        // Save defaults on blur
-        const saveMailFields = () => saveMailDefaults(subjectInput.value || '', messageInput.value || '');
-        subjectInput.addEventListener('blur', saveMailFields);
-        messageInput.addEventListener('blur', saveMailFields);
-        
-        optionsContainer.appendChild(modeRow);
+        optionsContainer.appendChild(factionRow);
         optionsContainer.appendChild(discountRow);
         optionsContainer.appendChild(marginRow);
-        optionsContainer.appendChild(subjectRow);
-        optionsContainer.appendChild(messageRow);
 
 
         // Table container
         const tableContainer = document.createElement('div');
         
-        // Message button container
-        const messageButtonContainer = document.createElement('div');
-        messageButtonContainer.style.cssText = 'margin-top: 20px;';
+        // Copy button container
+        const buttonContainer = document.createElement('div');
+        buttonContainer.style.cssText = 'margin-top: 20px;';
         
         // Function to update table
         let currentTableHtml = '';
-
-        const updateTable = () => {
-            const showBuyQuote = showBuyQuoteCheckbox.checked;
+        const updateTable = async () => {
+            const selectedFaction = factionSelect.value;
+            const currentFaction = selectedFaction === 'winner' ? winnerFaction : loserFaction;
+            const currentCacheData = selectedFaction === 'winner' ? winnerCacheData : loserCacheData;
+            
+            // Fetch faction basic data for leader/co-leader info
+            let leaderId = null;
+            let coLeaderId = null;
+            try {
+                const basicData = await new Promise((resolve, reject) => {
+                    GM_xmlhttpRequest({
+                        method: 'GET',
+                        url: `${API_BASE}/faction/${currentFaction.id}/basic`,
+                        headers: {
+                            'accept': 'application/json',
+                            'Authorization': `ApiKey ${API_KEY}`,
+                            'User-Agent': 'TornPDA-UserScript/1.0'
+                        },
+                        onload: function(response) {
+                            try {
+                                const data = JSON.parse(response.responseText);
+                                if (data.error) {
+                                    reject(new Error(data.error.error || data.error));
+                                    return;
+                                }
+                                resolve(data);
+                            } catch (e) {
+                                reject(e);
+                            }
+                        },
+                        onerror: function(error) {
+                            reject(error);
+                        }
+                    });
+                });
+                
+                leaderId = basicData.basic?.leader_id || null;
+                coLeaderId = basicData.basic?.co_leader_id || null;
+            } catch (e) {
+                console.error('Error fetching faction basic data:', e);
+            }
+            
             const discountM = parseFloat(discountInput.value) || 0;
             const discount = discountM * 1000000;
             const marginPercent = parseFloat(marginInput.value) || 0;
             const margin = marginPercent / 100;
             
             let table = '<table style="width: 100%; border-collapse: collapse; margin: 10px 0;">';
-            table += '<thead><tr style="background-color: #1a1a1a; border-bottom: 2px solid #d97706;">';
+            
+            // Table header with faction name and leader links
+            table += '<thead>';
+            table += '<tr style="background-color: #1a1a1a; border-bottom: 2px solid #d97706;">';
+            table += `<th colspan="5" style="padding: 10px; border: 1px solid #444; text-align: center; color: #d97706; font-weight: bold; font-size: 16px;">`;
+            table += `${currentFaction.name}`;
+            if (leaderId) {
+                const leaderMember = currentFaction.members?.find(m => (m.id === leaderId || m.player_id === leaderId));
+                const leaderName = leaderMember?.name || 'Leader';
+                table += ` | <a href="https://www.torn.com/messages.php#/p=compose&XID=${leaderId}" style="color: #4dabf7; text-decoration: none;">${leaderName}</a>`;
+            }
+            if (coLeaderId) {
+                const coLeaderMember = currentFaction.members?.find(m => (m.id === coLeaderId || m.player_id === coLeaderId));
+                const coLeaderName = coLeaderMember?.name || 'Co-Leader';
+                table += ` | <a href="https://www.torn.com/messages.php#/p=compose&XID=${coLeaderId}" style="color: #4dabf7; text-decoration: none;">${coLeaderName}</a>`;
+            }
+            table += `</th>`;
+            table += '</tr>';
+            table += '<tr style="background-color: #1a1a1a; border-bottom: 2px solid #d97706;">';
+            // Column order: Total Buy Price (left), Cache Name, Quantity, Cheapest Listed Price, Buy Price
+            table += '<th style="padding: 10px; border: 1px solid #444; text-align: left; color: #d97706; font-weight: bold;">Total Buy Price</th>';
             table += '<th style="padding: 10px; border: 1px solid #444; text-align: left; color: #d97706; font-weight: bold;">Cache Name</th>';
             table += '<th style="padding: 10px; border: 1px solid #444; text-align: center; color: #d97706; font-weight: bold;">Quantity</th>';
-            if (showBuyQuote) {
-                table += '<th style="padding: 10px; border: 1px solid #444; text-align: right; color: #d97706; font-weight: bold;">Cheapest Listed Price</th>';
-                table += '<th style="padding: 10px; border: 1px solid #444; text-align: right; color: #d97706; font-weight: bold;">Buy Price</th>';
-                table += '<th style="padding: 10px; border: 1px solid #444; text-align: right; color: #d97706; font-weight: bold;">Total Buy Price</th>';
-            } else {
-                table += '<th style="padding: 10px; border: 1px solid #444; text-align: right; color: #d97706; font-weight: bold;">Cheapest Listed Price</th>';
-                table += '<th style="padding: 10px; border: 1px solid #444; text-align: right; color: #d97706; font-weight: bold;">Total Value</th>';
-            }
-            table += '</tr></thead><tbody>';
+            table += '<th style="padding: 10px; border: 1px solid #444; text-align: right; color: #d97706; font-weight: bold;">Cheapest Listed Price</th>';
+            table += '<th style="padding: 10px; border: 1px solid #444; text-align: right; color: #d97706; font-weight: bold;">Buy Price</th>';
+            table += '</tr>';
+            table += '</thead><tbody>';
 
-            let totalValue = 0;
             let totalBuyPrice = 0;
-            cacheData.forEach((cache, index) => {
+            currentCacheData.forEach((cache, index) => {
                 const bgColor = index % 2 === 0 ? '#2d2d2d' : '#353535';
-                const cacheTotal = cache.cheapestPrice * cache.quantity;
-                totalValue += cacheTotal;
                 
-                let buyPrice = 0;
-                let buyTotal = 0;
-                if (showBuyQuote) {
-                    const afterDiscount = Math.max(0, cache.cheapestPrice - discount);
-                    buyPrice = Math.round(afterDiscount * (1 + margin));
-                    buyTotal = buyPrice * cache.quantity;
-                    totalBuyPrice += buyTotal;
-                }
+                // Calculate buy price: (cheapestPrice - discount) * (1 - margin) - FIX: subtract margin, not add
+                const afterDiscount = Math.max(0, cache.cheapestPrice - discount);
+                const buyPrice = Math.round(afterDiscount * (1 - margin)); // Subtract margin
+                const buyTotal = buyPrice * cache.quantity;
+                totalBuyPrice += buyTotal;
                 
                 table += `<tr style="background-color: ${bgColor}; color: #f5f5f5;">`;
+                // Total Buy Price on left
+                table += `<td style="padding: 8px; border: 1px solid #444; text-align: left; color: #fbbf24; font-weight: bold;">$${formatNumber(buyTotal)} (${formatPriceM(buyTotal)})</td>`;
                 table += `<td style="padding: 8px; border: 1px solid #444; color: #f5f5f5;">${cache.name}</td>`;
                 table += `<td style="padding: 8px; border: 1px solid #444; text-align: center; color: #f5f5f5;">${cache.quantity}</td>`;
-                if (showBuyQuote) {
-                    table += `<td style="padding: 8px; border: 1px solid #444; text-align: right; color: #6ee7b7;">$${formatNumber(cache.cheapestPrice)} (${formatPriceM(cache.cheapestPrice)})</td>`;
-                    table += `<td style="padding: 8px; border: 1px solid #444; text-align: right; color: #fbbf24;">$${formatNumber(buyPrice)} (${formatPriceM(buyPrice)})</td>`;
-                    table += `<td style="padding: 8px; border: 1px solid #444; text-align: right; color: #fbbf24; font-weight: bold;">$${formatNumber(buyTotal)} (${formatPriceM(buyTotal)})</td>`;
-                } else {
-                    table += `<td style="padding: 8px; border: 1px solid #444; text-align: right; color: #6ee7b7;">$${formatNumber(cache.cheapestPrice)} (${formatPriceM(cache.cheapestPrice)})</td>`;
-                    table += `<td style="padding: 8px; border: 1px solid #444; text-align: right; color: #6ee7b7; font-weight: bold;">$${formatNumber(cacheTotal)} (${formatPriceM(cacheTotal)})</td>`;
-                }
+                table += `<td style="padding: 8px; border: 1px solid #444; text-align: right; color: #6ee7b7;">$${formatNumber(cache.cheapestPrice)} (${formatPriceM(cache.cheapestPrice)})</td>`;
+                table += `<td style="padding: 8px; border: 1px solid #444; text-align: right; color: #fbbf24;">$${formatNumber(buyPrice)} (${formatPriceM(buyPrice)})</td>`;
                 table += '</tr>';
             });
 
-            // Total row - calculate column count
-            let colCount = 2; // Name + Quantity
-            if (showBuyQuote) {
-                colCount += 3; // Cheapest Listed Price + Buy Price + Total Buy Price
-            } else {
-                colCount += 2; // Cheapest Listed Price + Total Value
-            }
+            // Total row - rounded total on left
+            const roundedTotal = roundToMillion(totalBuyPrice);
             table += '<tr style="background-color: #1a1a1a; border-top: 2px solid #d97706;">';
-            if (showBuyQuote) {
-                const roundedTotal = roundToMillion(totalBuyPrice);
-                table += `<td colspan="${colCount - 1}" style="padding: 10px; border: 1px solid #444; text-align: right; color: #d97706; font-weight: bold;">Total Buy Price (Rounded):</td>`;
-                table += `<td style="padding: 10px; border: 1px solid #444; text-align: right; color: #fbbf24; font-weight: bold; font-size: 18px;">$${formatNumber(roundedTotal)} (${formatPriceM(roundedTotal)})</td>`;
-            } else {
-                table += `<td colspan="${colCount - 1}" style="padding: 10px; border: 1px solid #444; text-align: right; color: #d97706; font-weight: bold;">Total:</td>`;
-                table += `<td style="padding: 10px; border: 1px solid #444; text-align: right; color: #d97706; font-weight: bold;">$${formatNumber(totalValue)} (${formatPriceM(totalValue)})</td>`;
-            }
+            table += `<td style="padding: 10px; border: 1px solid #444; text-align: left; color: #fbbf24; font-weight: bold; font-size: 18px;">$${formatNumber(roundedTotal)} (${formatPriceM(roundedTotal)})</td>`;
+            table += `<td colspan="4" style="padding: 10px; border: 1px solid #444; text-align: right; color: #d97706; font-weight: bold;">Total Buy Price (Rounded)</td>`;
             table += '</tr>';
             table += '</tbody></table>';
 
             tableContainer.innerHTML = table;
             currentTableHtml = table;
-            
-            // Update message button
-            if (messageButtonContainer) {
-                messageButtonContainer.innerHTML = '';
-                if (showBuyQuote) {
-                    const composeBtn = document.createElement('button');
-                    composeBtn.textContent = '✉️ Compose mail and copy HTML body';
-                    composeBtn.style.cssText = `
-                        padding: 12px 24px;
-                        background-color: #3b82f6;
-                        color: #ffffff;
-                        border: none;
-                        border-radius: 4px;
-                        cursor: pointer;
-                        font-size: 16px;
-                        font-weight: bold;
-                        width: 100%;
-                        transition: all 0.2s;
-                    `;
-                    composeBtn.onmouseover = () => { composeBtn.style.backgroundColor = '#2563eb'; composeBtn.style.transform = 'scale(1.02)'; };
-                    composeBtn.onmouseout = () => { composeBtn.style.backgroundColor = '#3b82f6'; composeBtn.style.transform = 'scale(1)'; };
-                    composeBtn.onclick = async () => {
-                        try {
-                            const leaderId = await getFactionLeader(winnerFaction.id);
-                            const leaderMember = winnerFaction.members?.find(m => m.id === leaderId || m.player_id === leaderId);
-                            const leaderName = leaderMember?.name || 'Leader';
-                            const leaderDisplay = leaderId ? `${leaderName} [${leaderId}]` : '';
-                            const subject = subjectInput.value || 'War Cache Purchase';
-                            const message = messageInput.value || '';
-                            const bodyHtml = `${message}<br><br>${currentTableHtml}`;
-                            
-                            // Copy full message + table to clipboard
-                            GM_setClipboard(bodyHtml, 'text');
-                            
-                            // Store values for initialize() to populate fields
-                            const composeData = {
-                                leaderDisplay: leaderDisplay,
-                                subject: subject,
-                                timestamp: Date.now()
-                            };
-                            localStorage.setItem('rwToolkitComposeData', JSON.stringify(composeData));
-                            
-                            // Navigate to compose page
-                            window.open('https://www.torn.com/messages.php#/p=compose', '_blank');
-                            
-                            // Show feedback
-                            composeBtn.textContent = '✓ Copied! Opening compose...';
-                            setTimeout(() => {
-                                composeBtn.textContent = '✉️ Compose mail and copy HTML body';
-                            }, 2000);
-                        } catch (error) {
-                            console.error('Error getting faction leader:', error);
-                            // Still copy and navigate, just without recipient
-                            const subject = subjectInput.value || 'War Cache Purchase';
-                            const message = messageInput.value || '';
-                            const bodyHtml = `${message}<br><br>${currentTableHtml}`;
-                            GM_setClipboard(bodyHtml, 'text');
-                            
-                            const composeData = {
-                                leaderDisplay: '',
-                                subject: subject,
-                                timestamp: Date.now()
-                            };
-                            localStorage.setItem('rwToolkitComposeData', JSON.stringify(composeData));
-                            
-                            window.open('https://www.torn.com/messages.php#/p=compose', '_blank');
-                            composeBtn.textContent = '✓ Copied! (No leader ID)';
-                            setTimeout(() => {
-                                composeBtn.textContent = '✉️ Compose mail and copy HTML body';
-                            }, 2000);
-                        }
-                    };
-                    messageButtonContainer.appendChild(composeBtn);
-                } else {
-                    // Copy HTML table button for prices mode
-                    const copyBtn = document.createElement('button');
-                    copyBtn.textContent = '📋 Copy HTML table';
-                    copyBtn.style.cssText = `
-                        padding: 12px 24px;
-                        background-color: #444;
-                        color: #ffffff;
-                        border: 1px solid #d97706;
-                        border-radius: 4px;
-                        cursor: pointer;
-                        font-size: 14px;
-                        font-weight: bold;
-                        width: 100%;
-                        margin-top: 10px;
-                        transition: all 0.2s;
-                    `;
-                    copyBtn.onmouseover = () => { copyBtn.style.backgroundColor = '#d97706'; copyBtn.style.color = '#fff'; };
-                    copyBtn.onmouseout = () => { copyBtn.style.backgroundColor = '#444'; copyBtn.style.color = '#fff'; };
-                    copyBtn.onclick = () => {
-                        GM_setClipboard(currentTableHtml, 'text');
-                        copyBtn.textContent = 'Copied!';
-                        setTimeout(() => copyBtn.textContent = '📋 Copy HTML table', 1500);
-                    };
-                    messageButtonContainer.appendChild(copyBtn);
-                }
-            }
         };
         
+        // Copy HTML button
+        const copyBtn = document.createElement('button');
+        copyBtn.textContent = '📋 Copy HTML table';
+        copyBtn.style.cssText = `
+            padding: 12px 24px;
+            background-color: #444;
+            color: #ffffff;
+            border: 1px solid #d97706;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            width: 100%;
+            transition: all 0.2s;
+        `;
+        copyBtn.onmouseover = () => { copyBtn.style.backgroundColor = '#d97706'; copyBtn.style.color = '#fff'; };
+        copyBtn.onmouseout = () => { copyBtn.style.backgroundColor = '#444'; copyBtn.style.color = '#fff'; };
+        copyBtn.onclick = () => {
+            GM_setClipboard(currentTableHtml, 'text');
+            copyBtn.textContent = 'Copied!';
+            setTimeout(() => copyBtn.textContent = '📋 Copy HTML table', 1500);
+        };
+        buttonContainer.appendChild(copyBtn);
+        
+        // Initial table render
         updateTable();
-        showBuyQuoteCheckbox.addEventListener('change', updateTable);
+        
+        // Event listeners
+        factionSelect.addEventListener('change', updateTable);
         discountInput.addEventListener('input', updateTable);
         marginInput.addEventListener('input', updateTable);
 
         modal.appendChild(header);
         modal.appendChild(optionsContainer);
         modal.appendChild(tableContainer);
-        modal.appendChild(messageButtonContainer);
+        modal.appendChild(buttonContainer);
         overlay.appendChild(modal);
         document.body.appendChild(overlay);
 
@@ -1850,22 +1784,27 @@
         let longPressTimer = null;
         let isLongPress = false;
 
-        // Click handler - open tool picker
+        // Click handler - default behavior based on page
         a.addEventListener('click', function (e) {
             e.preventDefault();
             if (!isLongPress) {
-                openToolPicker();
+                // If on war report page, open cache prices directly; otherwise open market lister
+                if (isWarReportPage()) {
+                    mainCachePrices();
+                } else {
+                    main();
+                }
             }
             isLongPress = false;
         });
 
-        // Long press for mobile (touchstart/touchend)
+        // Long press for mobile (touchstart/touchend) - opens tool picker
         a.addEventListener('touchstart', function (e) {
             isLongPress = false;
             longPressTimer = setTimeout(() => {
                 isLongPress = true;
                 e.preventDefault();
-                openIconSettings();
+                openToolPicker();
             }, 500); // 500ms for long press
         });
 
@@ -1883,10 +1822,10 @@
             }
         });
 
-        // Right-click to open settings (desktop)
+        // Right-click to open tool picker (desktop)
         a.addEventListener('contextmenu', function (e) {
             e.preventDefault();
-            openIconSettings();
+            openToolPicker();
         });
 
         li.appendChild(a);
