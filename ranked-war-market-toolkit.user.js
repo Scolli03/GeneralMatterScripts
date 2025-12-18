@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ranked War Toolkit
 // @namespace    http://tampermonkey.net/
-// @version      2.0.0
+// @version      2.1.7
 // @description  Ranked War toolkit: Market Lister, Cache Prices, and Buy Quotes
 // @author       Scolli03[3150751], GeneralMatter
 // @match        https://www.torn.com/*
@@ -1317,13 +1317,16 @@
                 const priceData = await fetchItemPrice(item.id);
                 const listings = priceData.listings || [];
                 if (listings.length > 0) {
-                    const cheapest = listings.sort((a, b) => a.price - b.price)[0];
+                    // Sort listings by price (cheapest first)
+                    const sortedListings = listings.sort((a, b) => a.price - b.price);
                     cacheData.push({
                         id: item.id,
                         name: item.name,
                         quantity: item.quantity,
-                        cheapestPrice: cheapest.price,
-                        listing: cheapest,
+                        cheapestPrice: sortedListings[0].price,
+                        listing: sortedListings[0],
+                        allListings: sortedListings, // Store all listings
+                        selectedListingIndex: 0, // Track which listing is selected (0 = cheapest)
                         marketPrice: priceData.market_price || null,
                         bazaarAverage: priceData.bazaar_average || null
                     });
@@ -1334,6 +1337,8 @@
                         quantity: item.quantity,
                         cheapestPrice: priceData.market_price || 0,
                         listing: null,
+                        allListings: [],
+                        selectedListingIndex: 0,
                         marketPrice: priceData.market_price || null,
                         bazaarAverage: priceData.bazaar_average || null
                     });
@@ -1577,9 +1582,42 @@
         marginRow.appendChild(marginInput);
         marginRow.appendChild(marginUnitLabel);
         
+        // Max deviation input (for price color coding)
+        const deviationRow = document.createElement('div');
+        deviationRow.style.cssText = 'display: flex; align-items: center; gap: 10px; margin-bottom: 10px;';
+        
+        const deviationLabel = document.createElement('label');
+        deviationLabel.textContent = 'Max deviation from bazaar average (%):';
+        deviationLabel.style.cssText = 'color: #f5f5f5; font-weight: bold; min-width: 150px;';
+        
+        const deviationInput = document.createElement('input');
+        deviationInput.type = 'number';
+        deviationInput.min = '0';
+        deviationInput.max = '100';
+        deviationInput.step = '0.1';
+        deviationInput.value = '5'; // Default 5%
+        deviationInput.style.cssText = `
+            width: 100px;
+            padding: 6px;
+            background-color: #353535;
+            color: #f5f5f5;
+            border: 1px solid #444;
+            border-radius: 4px;
+            font-size: 14px;
+        `;
+        
+        const deviationUnitLabel = document.createElement('span');
+        deviationUnitLabel.textContent = '%';
+        deviationUnitLabel.style.cssText = 'color: #f5f5f5;';
+        
+        deviationRow.appendChild(deviationLabel);
+        deviationRow.appendChild(deviationInput);
+        deviationRow.appendChild(deviationUnitLabel);
+        
         optionsContainer.appendChild(factionRow);
         optionsContainer.appendChild(discountRow);
         optionsContainer.appendChild(marginRow);
+        optionsContainer.appendChild(deviationRow);
 
 
         // Table container
@@ -1637,6 +1675,8 @@
             const discount = discountM * 1000000;
             const marginPercent = parseFloat(marginInput.value) || 0;
             const margin = marginPercent / 100;
+            const deviationPercent = parseFloat(deviationInput.value) || 5;
+            const deviation = deviationPercent / 100;
             
             let table = '<table style="width: 100%; border-collapse: collapse; margin: 10px 0;">';
             
@@ -1671,8 +1711,15 @@
             currentCacheData.forEach((cache, index) => {
                 const bgColor = index % 2 === 0 ? '#2d2d2d' : '#353535';
                 
-                // Calculate buy price: (cheapestPrice - discount) * (1 - margin) - FIX: subtract margin, not add
-                const afterDiscount = Math.max(0, cache.cheapestPrice - discount);
+                // Get the selected listing (or cheapest if no selection)
+                const selectedIndex = cache.selectedListingIndex || 0;
+                const selectedListing = cache.allListings && cache.allListings.length > 0 
+                    ? cache.allListings[selectedIndex] 
+                    : cache.listing;
+                const currentPrice = selectedListing ? selectedListing.price : cache.cheapestPrice;
+                
+                // Calculate buy price: (currentPrice - discount) * (1 - margin) - FIX: subtract margin, not add
+                const afterDiscount = Math.max(0, currentPrice - discount);
                 const buyPrice = Math.round(afterDiscount * (1 - margin)); // Subtract margin
                 const buyTotal = buyPrice * cache.quantity;
                 totalBuyPrice += buyTotal;
@@ -1680,19 +1727,25 @@
                 // Calculate percentage difference from bazaar average
                 let priceDiffHtml = '';
                 let priceDiffColor = '#6ee7b7'; // Default green
+                let isOutOfThreshold = false;
                 if (cache.bazaarAverage && cache.bazaarAverage > 0) {
-                    const percentDiff = ((cache.cheapestPrice - cache.bazaarAverage) / cache.bazaarAverage) * 100;
+                    const percentDiff = ((currentPrice - cache.bazaarAverage) / cache.bazaarAverage) * 100;
                     const percentDiffFormatted = percentDiff >= 0 ? `+${percentDiff.toFixed(1)}%` : `${percentDiff.toFixed(1)}%`;
                     
-                    // Color coding based on percentage difference
-                    if (percentDiff < -10) {
-                        priceDiffColor = '#ef4444'; // Red - way under average
-                    } else if (percentDiff < -5) {
-                        priceDiffColor = '#f59e0b'; // Orange - under average
-                    } else if (percentDiff <= 5) {
-                        priceDiffColor = '#6ee7b7'; // Green - within normal range
+                    // Color coding based on deviation threshold
+                    // Lower threshold: bazaarAverage * (1 - deviation)
+                    // Upper threshold: bazaarAverage * (1 + deviation)
+                    const lowerThreshold = cache.bazaarAverage * (1 - deviation);
+                    const upperThreshold = cache.bazaarAverage * (1 + deviation);
+                    
+                    if (currentPrice <= lowerThreshold) {
+                        priceDiffColor = '#1e40af'; // Dark blue - at or below lower threshold
+                        isOutOfThreshold = true;
+                    } else if (currentPrice > upperThreshold) {
+                        priceDiffColor = '#ef4444'; // Red - above upper threshold
+                        isOutOfThreshold = true;
                     } else {
-                        priceDiffColor = '#60a5fa'; // Blue - above average
+                        priceDiffColor = '#6ee7b7'; // Green - within threshold range
                     }
                     
                     // Build tooltip content with HTML
@@ -1700,7 +1753,36 @@
                     const marketPriceStr = cache.marketPrice ? `$${formatNumber(cache.marketPrice)} (${formatPriceM(cache.marketPrice)})` : 'N/A';
                     const bazaarAvgStr = `$${formatNumber(cache.bazaarAverage)} (${formatPriceM(cache.bazaarAverage)})`;
                     
-                    priceDiffHtml = ` <span class="price-diff-tooltip" data-tooltip-id="${tooltipId}" style="color: ${priceDiffColor}; font-weight: bold; cursor: help; position: relative; border-bottom: 1px dotted ${priceDiffColor}; display: inline-block;">${percentDiffFormatted}
+                    // Build alternative listings if out of threshold
+                    let alternativesHtml = '';
+                    if (isOutOfThreshold && cache.allListings && cache.allListings.length > 1) {
+                        alternativesHtml = '<div style="border-top: 1px solid #444; margin-top: 8px; padding-top: 8px;">';
+                        alternativesHtml += '<div style="font-weight: bold; margin-bottom: 4px; color: #d97706;">Alternative Listings:</div>';
+                        cache.allListings.slice(0, 5).forEach((listing, listIndex) => {
+                            if (listIndex === selectedIndex) return; // Skip current selection
+                            const listPrice = listing.price;
+                            const listPercentDiff = ((listPrice - cache.bazaarAverage) / cache.bazaarAverage) * 100;
+                            const listLowerThreshold = cache.bazaarAverage * (1 - deviation);
+                            const listUpperThreshold = cache.bazaarAverage * (1 + deviation);
+                            const isInRange = listPrice > listLowerThreshold && listPrice <= listUpperThreshold;
+                            
+                            alternativesHtml += `<div class="alt-listing" data-cache-id="${cache.id}" data-cache-index="${index}" data-listing-index="${listIndex}" style="
+                                padding: 4px 8px;
+                                margin: 2px 0;
+                                background-color: ${isInRange ? '#2d5a2d' : '#353535'};
+                                border: 1px solid ${isInRange ? '#6ee7b7' : '#444'};
+                                border-radius: 3px;
+                                cursor: pointer;
+                                transition: background-color 0.2s;
+                            " onmouseover="this.style.backgroundColor='#444'" onmouseout="this.style.backgroundColor='${isInRange ? '#2d5a2d' : '#353535'}'">
+                                $${formatNumber(listPrice)} (${formatPriceM(listPrice)}) ${listPercentDiff >= 0 ? '+' : ''}${listPercentDiff.toFixed(1)}%
+                                ${isInRange ? '<span style="color: #6ee7b7;">✓</span>' : ''}
+                            </div>`;
+                        });
+                        alternativesHtml += '</div>';
+                    }
+                    
+                    priceDiffHtml = ` <span class="price-diff-tooltip" data-tooltip-id="${tooltipId}" data-cache-id="${cache.id}" data-cache-index="${index}" style="color: ${priceDiffColor}; font-weight: bold; cursor: help; position: relative; border-bottom: 1px dotted ${priceDiffColor}; display: inline-block;">${percentDiffFormatted}
                         <span class="tooltip-content" id="${tooltipId}" style="
                             visibility: hidden;
                             opacity: 0;
@@ -1721,10 +1803,11 @@
                             line-height: 1.6;
                             min-width: 200px;
                             transition: opacity 0.2s;
-                            pointer-events: none;
+                            pointer-events: auto;
                         ">
                             <div style="border-bottom: 1px solid #444; padding-bottom: 4px; margin-bottom: 4px;">Market Price: ${marketPriceStr}</div>
-                            <div>Bazaar Average: ${bazaarAvgStr}</div>
+                            <div style="border-bottom: 1px solid #444; padding-bottom: 4px; margin-bottom: 4px;">Bazaar Average: ${bazaarAvgStr}</div>
+                            ${alternativesHtml}
                         </span>
                     </span>`;
                 }
@@ -1734,7 +1817,7 @@
                 table += `<td style="padding: 8px; border: 1px solid #444; text-align: left; color: #fbbf24; font-weight: bold;">$${formatNumber(buyTotal)} (${formatPriceM(buyTotal)})</td>`;
                 table += `<td style="padding: 8px; border: 1px solid #444; color: #f5f5f5;">${cache.name}</td>`;
                 table += `<td style="padding: 8px; border: 1px solid #444; text-align: center; color: #f5f5f5;">${cache.quantity}</td>`;
-                table += `<td style="padding: 8px; border: 1px solid #444; text-align: right; color: #6ee7b7;">$${formatNumber(cache.cheapestPrice)} (${formatPriceM(cache.cheapestPrice)})${priceDiffHtml}</td>`;
+                table += `<td style="padding: 8px; border: 1px solid #444; text-align: right; color: #6ee7b7;">$${formatNumber(currentPrice)} (${formatPriceM(currentPrice)})${priceDiffHtml}</td>`;
                 table += `<td style="padding: 8px; border: 1px solid #444; text-align: right; color: #fbbf24;">$${formatNumber(buyPrice)} (${formatPriceM(buyPrice)})</td>`;
                 table += '</tr>';
             });
@@ -1761,7 +1844,19 @@
                         tooltip.style.visibility = 'visible';
                         tooltip.style.opacity = '1';
                     });
-                    span.addEventListener('mouseleave', () => {
+                    span.addEventListener('mouseleave', (e) => {
+                        // Don't hide if mouse is moving to tooltip
+                        if (!tooltip.contains(e.relatedTarget)) {
+                            tooltip.style.visibility = 'hidden';
+                            tooltip.style.opacity = '0';
+                        }
+                    });
+                    // Keep tooltip visible when hovering over it
+                    tooltip.addEventListener('mouseenter', () => {
+                        tooltip.style.visibility = 'visible';
+                        tooltip.style.opacity = '1';
+                    });
+                    tooltip.addEventListener('mouseleave', () => {
                         tooltip.style.visibility = 'hidden';
                         tooltip.style.opacity = '0';
                     });
@@ -1789,6 +1884,30 @@
                         }
                     });
                 }
+            });
+            
+            // Add event listeners for alternative listing selection
+            const altListings = tableContainer.querySelectorAll('.alt-listing');
+            altListings.forEach(altListing => {
+                altListing.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const cacheId = altListing.getAttribute('data-cache-id');
+                    const listingIndex = parseInt(altListing.getAttribute('data-listing-index'));
+                    
+                    // Find the cache item in the appropriate data array (winner or loser)
+                    const selectedFaction = factionSelect.value;
+                    const dataArray = selectedFaction === 'winner' ? winnerCacheData : loserCacheData;
+                    const cacheItem = dataArray.find(c => c.id == cacheId);
+                    
+                    if (cacheItem && cacheItem.allListings && cacheItem.allListings[listingIndex]) {
+                        cacheItem.selectedListingIndex = listingIndex;
+                        cacheItem.cheapestPrice = cacheItem.allListings[listingIndex].price;
+                        cacheItem.listing = cacheItem.allListings[listingIndex];
+                        // Refresh the table
+                        updateTable();
+                    }
+                });
             });
         };
         
@@ -1823,6 +1942,7 @@
         factionSelect.addEventListener('change', updateTable);
         discountInput.addEventListener('input', updateTable);
         marginInput.addEventListener('input', updateTable);
+        deviationInput.addEventListener('input', updateTable);
 
         modal.appendChild(header);
         modal.appendChild(optionsContainer);
