@@ -1323,7 +1323,9 @@
                         name: item.name,
                         quantity: item.quantity,
                         cheapestPrice: cheapest.price,
-                        listing: cheapest
+                        listing: cheapest,
+                        marketPrice: priceData.market_price || null,
+                        bazaarAverage: priceData.bazaar_average || null
                     });
                 } else {
                     cacheData.push({
@@ -1331,7 +1333,9 @@
                         name: item.name,
                         quantity: item.quantity,
                         cheapestPrice: priceData.market_price || 0,
-                        listing: null
+                        listing: null,
+                        marketPrice: priceData.market_price || null,
+                        bazaarAverage: priceData.bazaar_average || null
                     });
                 }
                 await new Promise(resolve => setTimeout(resolve, 200));
@@ -1343,6 +1347,8 @@
                     quantity: item.quantity,
                     cheapestPrice: 0,
                     listing: null,
+                    marketPrice: null,
+                    bazaarAverage: null,
                     error: error.message
                 });
             }
@@ -1671,12 +1677,64 @@
                 const buyTotal = buyPrice * cache.quantity;
                 totalBuyPrice += buyTotal;
                 
+                // Calculate percentage difference from bazaar average
+                let priceDiffHtml = '';
+                let priceDiffColor = '#6ee7b7'; // Default green
+                if (cache.bazaarAverage && cache.bazaarAverage > 0) {
+                    const percentDiff = ((cache.cheapestPrice - cache.bazaarAverage) / cache.bazaarAverage) * 100;
+                    const percentDiffFormatted = percentDiff >= 0 ? `+${percentDiff.toFixed(1)}%` : `${percentDiff.toFixed(1)}%`;
+                    
+                    // Color coding based on percentage difference
+                    if (percentDiff < -10) {
+                        priceDiffColor = '#ef4444'; // Red - way under average
+                    } else if (percentDiff < -5) {
+                        priceDiffColor = '#f59e0b'; // Orange - under average
+                    } else if (percentDiff <= 5) {
+                        priceDiffColor = '#6ee7b7'; // Green - within normal range
+                    } else {
+                        priceDiffColor = '#60a5fa'; // Blue - above average
+                    }
+                    
+                    // Build tooltip content with HTML
+                    const tooltipId = `tooltip-${cache.id}-${index}`;
+                    const marketPriceStr = cache.marketPrice ? `$${formatNumber(cache.marketPrice)} (${formatPriceM(cache.marketPrice)})` : 'N/A';
+                    const bazaarAvgStr = `$${formatNumber(cache.bazaarAverage)} (${formatPriceM(cache.bazaarAverage)})`;
+                    
+                    priceDiffHtml = ` <span class="price-diff-tooltip" data-tooltip-id="${tooltipId}" style="color: ${priceDiffColor}; font-weight: bold; cursor: help; position: relative; border-bottom: 1px dotted ${priceDiffColor}; display: inline-block;">${percentDiffFormatted}
+                        <span class="tooltip-content" id="${tooltipId}" style="
+                            visibility: hidden;
+                            opacity: 0;
+                            position: absolute;
+                            background-color: #1a1a1a;
+                            color: #f5f5f5;
+                            padding: 8px 12px;
+                            border-radius: 4px;
+                            border: 1px solid #444;
+                            box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+                            z-index: 10001;
+                            bottom: 100%;
+                            left: 50%;
+                            transform: translateX(-50%);
+                            margin-bottom: 5px;
+                            font-size: 12px;
+                            font-weight: normal;
+                            line-height: 1.6;
+                            min-width: 200px;
+                            transition: opacity 0.2s;
+                            pointer-events: none;
+                        ">
+                            <div style="border-bottom: 1px solid #444; padding-bottom: 4px; margin-bottom: 4px;">Market Price: ${marketPriceStr}</div>
+                            <div>Bazaar Average: ${bazaarAvgStr}</div>
+                        </span>
+                    </span>`;
+                }
+                
                 table += `<tr style="background-color: ${bgColor}; color: #f5f5f5;">`;
                 // Total Buy Price on left
                 table += `<td style="padding: 8px; border: 1px solid #444; text-align: left; color: #fbbf24; font-weight: bold;">$${formatNumber(buyTotal)} (${formatPriceM(buyTotal)})</td>`;
                 table += `<td style="padding: 8px; border: 1px solid #444; color: #f5f5f5;">${cache.name}</td>`;
                 table += `<td style="padding: 8px; border: 1px solid #444; text-align: center; color: #f5f5f5;">${cache.quantity}</td>`;
-                table += `<td style="padding: 8px; border: 1px solid #444; text-align: right; color: #6ee7b7;">$${formatNumber(cache.cheapestPrice)} (${formatPriceM(cache.cheapestPrice)})</td>`;
+                table += `<td style="padding: 8px; border: 1px solid #444; text-align: right; color: #6ee7b7;">$${formatNumber(cache.cheapestPrice)} (${formatPriceM(cache.cheapestPrice)})${priceDiffHtml}</td>`;
                 table += `<td style="padding: 8px; border: 1px solid #444; text-align: right; color: #fbbf24;">$${formatNumber(buyPrice)} (${formatPriceM(buyPrice)})</td>`;
                 table += '</tr>';
             });
@@ -1691,6 +1749,47 @@
 
             tableContainer.innerHTML = table;
             currentTableHtml = table;
+            
+            // Add tooltip event listeners
+            const tooltipSpans = tableContainer.querySelectorAll('.price-diff-tooltip');
+            tooltipSpans.forEach(span => {
+                const tooltipId = span.getAttribute('data-tooltip-id');
+                const tooltip = document.getElementById(tooltipId);
+                if (tooltip) {
+                    // Show on hover
+                    span.addEventListener('mouseenter', () => {
+                        tooltip.style.visibility = 'visible';
+                        tooltip.style.opacity = '1';
+                    });
+                    span.addEventListener('mouseleave', () => {
+                        tooltip.style.visibility = 'hidden';
+                        tooltip.style.opacity = '0';
+                    });
+                    // Also show on click (for mobile/touch)
+                    span.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (tooltip.style.visibility === 'visible') {
+                            tooltip.style.visibility = 'hidden';
+                            tooltip.style.opacity = '0';
+                        } else {
+                            tooltip.style.visibility = 'visible';
+                            tooltip.style.opacity = '1';
+                            // Hide on click outside
+                            setTimeout(() => {
+                                const hideOnClick = (clickEvent) => {
+                                    if (!span.contains(clickEvent.target) && !tooltip.contains(clickEvent.target)) {
+                                        tooltip.style.visibility = 'hidden';
+                                        tooltip.style.opacity = '0';
+                                        document.removeEventListener('click', hideOnClick);
+                                    }
+                                };
+                                document.addEventListener('click', hideOnClick);
+                            }, 0);
+                        }
+                    });
+                }
+            });
         };
         
         // Copy HTML button
