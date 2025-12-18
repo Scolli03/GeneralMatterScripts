@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ranked War Toolkit
 // @namespace    http://tampermonkey.net/
-// @version      2.1.7
+// @version      2.2.3
 // @description  Ranked War toolkit: Market Lister, Cache Prices, and Buy Quotes
 // @author       Scolli03[3150751], GeneralMatter
 // @match        https://www.torn.com/*
@@ -1582,42 +1582,9 @@
         marginRow.appendChild(marginInput);
         marginRow.appendChild(marginUnitLabel);
         
-        // Max deviation input (for price color coding)
-        const deviationRow = document.createElement('div');
-        deviationRow.style.cssText = 'display: flex; align-items: center; gap: 10px; margin-bottom: 10px;';
-        
-        const deviationLabel = document.createElement('label');
-        deviationLabel.textContent = 'Max deviation from bazaar average (%):';
-        deviationLabel.style.cssText = 'color: #f5f5f5; font-weight: bold; min-width: 150px;';
-        
-        const deviationInput = document.createElement('input');
-        deviationInput.type = 'number';
-        deviationInput.min = '0';
-        deviationInput.max = '100';
-        deviationInput.step = '0.1';
-        deviationInput.value = '5'; // Default 5%
-        deviationInput.style.cssText = `
-            width: 100px;
-            padding: 6px;
-            background-color: #353535;
-            color: #f5f5f5;
-            border: 1px solid #444;
-            border-radius: 4px;
-            font-size: 14px;
-        `;
-        
-        const deviationUnitLabel = document.createElement('span');
-        deviationUnitLabel.textContent = '%';
-        deviationUnitLabel.style.cssText = 'color: #f5f5f5;';
-        
-        deviationRow.appendChild(deviationLabel);
-        deviationRow.appendChild(deviationInput);
-        deviationRow.appendChild(deviationUnitLabel);
-        
         optionsContainer.appendChild(factionRow);
         optionsContainer.appendChild(discountRow);
         optionsContainer.appendChild(marginRow);
-        optionsContainer.appendChild(deviationRow);
 
 
         // Table container
@@ -1629,6 +1596,7 @@
         
         // Function to update table
         let currentTableHtml = '';
+        let cleanTableHtml = ''; // Clean version without tooltips for copying
         const updateTable = async () => {
             const selectedFaction = factionSelect.value;
             const currentFaction = selectedFaction === 'winner' ? winnerFaction : loserFaction;
@@ -1675,8 +1643,6 @@
             const discount = discountM * 1000000;
             const marginPercent = parseFloat(marginInput.value) || 0;
             const margin = marginPercent / 100;
-            const deviationPercent = parseFloat(deviationInput.value) || 5;
-            const deviation = deviationPercent / 100;
             
             let table = '<table style="width: 100%; border-collapse: collapse; margin: 10px 0;">';
             
@@ -1688,12 +1654,12 @@
             if (leaderId) {
                 const leaderMember = currentFaction.members?.find(m => (m.id === leaderId || m.player_id === leaderId));
                 const leaderName = leaderMember?.name || 'Leader';
-                table += ` | <a href="https://www.torn.com/messages.php#/p=compose&XID=${leaderId}" style="color: #4dabf7; text-decoration: none;">${leaderName}</a>`;
+                table += ` | <a href="https://www.torn.com/profiles.php?XID=${leaderId}" target="_blank" style="color: #4dabf7; text-decoration: none;">${leaderName}</a>`;
             }
             if (coLeaderId) {
                 const coLeaderMember = currentFaction.members?.find(m => (m.id === coLeaderId || m.player_id === coLeaderId));
                 const coLeaderName = coLeaderMember?.name || 'Co-Leader';
-                table += ` | <a href="https://www.torn.com/messages.php#/p=compose&XID=${coLeaderId}" style="color: #4dabf7; text-decoration: none;">${coLeaderName}</a>`;
+                table += ` | <a href="https://www.torn.com/profiles.php?XID=${coLeaderId}" target="_blank" style="color: #4dabf7; text-decoration: none;">${coLeaderName}</a>`;
             }
             table += `</th>`;
             table += '</tr>';
@@ -1727,25 +1693,17 @@
                 // Calculate percentage difference from bazaar average
                 let priceDiffHtml = '';
                 let priceDiffColor = '#6ee7b7'; // Default green
-                let isOutOfThreshold = false;
                 if (cache.bazaarAverage && cache.bazaarAverage > 0) {
                     const percentDiff = ((currentPrice - cache.bazaarAverage) / cache.bazaarAverage) * 100;
                     const percentDiffFormatted = percentDiff >= 0 ? `+${percentDiff.toFixed(1)}%` : `${percentDiff.toFixed(1)}%`;
                     
-                    // Color coding based on deviation threshold
-                    // Lower threshold: bazaarAverage * (1 - deviation)
-                    // Upper threshold: bazaarAverage * (1 + deviation)
-                    const lowerThreshold = cache.bazaarAverage * (1 - deviation);
-                    const upperThreshold = cache.bazaarAverage * (1 + deviation);
-                    
-                    if (currentPrice <= lowerThreshold) {
-                        priceDiffColor = '#1e40af'; // Dark blue - at or below lower threshold
-                        isOutOfThreshold = true;
-                    } else if (currentPrice > upperThreshold) {
-                        priceDiffColor = '#ef4444'; // Red - above upper threshold
-                        isOutOfThreshold = true;
+                    // Simple color coding based on percentage difference
+                    if (percentDiff < -5) {
+                        priceDiffColor = '#1e40af'; // Dark blue - significantly below average
+                    } else if (percentDiff > 5) {
+                        priceDiffColor = '#ef4444'; // Red - significantly above average
                     } else {
-                        priceDiffColor = '#6ee7b7'; // Green - within threshold range
+                        priceDiffColor = '#6ee7b7'; // Green - within normal range
                     }
                     
                     // Build tooltip content with HTML
@@ -1753,30 +1711,34 @@
                     const marketPriceStr = cache.marketPrice ? `$${formatNumber(cache.marketPrice)} (${formatPriceM(cache.marketPrice)})` : 'N/A';
                     const bazaarAvgStr = `$${formatNumber(cache.bazaarAverage)} (${formatPriceM(cache.bazaarAverage)})`;
                     
-                    // Build alternative listings if out of threshold
+                    // Always build alternative listings if available
                     let alternativesHtml = '';
-                    if (isOutOfThreshold && cache.allListings && cache.allListings.length > 1) {
+                    if (cache.allListings && cache.allListings.length > 1) {
                         alternativesHtml = '<div style="border-top: 1px solid #444; margin-top: 8px; padding-top: 8px;">';
                         alternativesHtml += '<div style="font-weight: bold; margin-bottom: 4px; color: #d97706;">Alternative Listings:</div>';
                         cache.allListings.slice(0, 5).forEach((listing, listIndex) => {
                             if (listIndex === selectedIndex) return; // Skip current selection
                             const listPrice = listing.price;
                             const listPercentDiff = ((listPrice - cache.bazaarAverage) / cache.bazaarAverage) * 100;
-                            const listLowerThreshold = cache.bazaarAverage * (1 - deviation);
-                            const listUpperThreshold = cache.bazaarAverage * (1 + deviation);
-                            const isInRange = listPrice > listLowerThreshold && listPrice <= listUpperThreshold;
+                            
+                            // Simple color coding for alternatives
+                            let altColor = '#6ee7b7'; // Green
+                            if (listPercentDiff < -5) {
+                                altColor = '#1e40af'; // Dark blue
+                            } else if (listPercentDiff > 5) {
+                                altColor = '#ef4444'; // Red
+                            }
                             
                             alternativesHtml += `<div class="alt-listing" data-cache-id="${cache.id}" data-cache-index="${index}" data-listing-index="${listIndex}" style="
                                 padding: 4px 8px;
                                 margin: 2px 0;
-                                background-color: ${isInRange ? '#2d5a2d' : '#353535'};
-                                border: 1px solid ${isInRange ? '#6ee7b7' : '#444'};
+                                background-color: #353535;
+                                border: 1px solid ${altColor};
                                 border-radius: 3px;
                                 cursor: pointer;
                                 transition: background-color 0.2s;
-                            " onmouseover="this.style.backgroundColor='#444'" onmouseout="this.style.backgroundColor='${isInRange ? '#2d5a2d' : '#353535'}'">
-                                $${formatNumber(listPrice)} (${formatPriceM(listPrice)}) ${listPercentDiff >= 0 ? '+' : ''}${listPercentDiff.toFixed(1)}%
-                                ${isInRange ? '<span style="color: #6ee7b7;">✓</span>' : ''}
+                            " onmouseover="this.style.backgroundColor='#444'" onmouseout="this.style.backgroundColor='#353535'">
+                                $${formatNumber(listPrice)} (${formatPriceM(listPrice)}) <span style="color: ${altColor};">${listPercentDiff >= 0 ? '+' : ''}${listPercentDiff.toFixed(1)}%</span>
                             </div>`;
                         });
                         alternativesHtml += '</div>';
@@ -1797,7 +1759,7 @@
                             bottom: 100%;
                             left: 50%;
                             transform: translateX(-50%);
-                            margin-bottom: 5px;
+                            margin-bottom: 2px;
                             font-size: 12px;
                             font-weight: normal;
                             line-height: 1.6;
@@ -1833,29 +1795,107 @@
             tableContainer.innerHTML = table;
             currentTableHtml = table;
             
+            // Create clean version without tooltips for copying
+            let cleanTable = '<table style="width: 100%; border-collapse: collapse; margin: 10px 0;">';
+            cleanTable += '<thead>';
+            cleanTable += '<tr style="background-color: #1a1a1a; border-bottom: 2px solid #d97706;">';
+            cleanTable += `<th colspan="5" style="padding: 10px; border: 1px solid #444; text-align: center; color: #d97706; font-weight: bold; font-size: 16px;">`;
+            cleanTable += `${currentFaction.name}`;
+            if (leaderId) {
+                const leaderMember = currentFaction.members?.find(m => (m.id === leaderId || m.player_id === leaderId));
+                const leaderName = leaderMember?.name || 'Leader';
+                cleanTable += ` | <a href="https://www.torn.com/profiles.php?XID=${leaderId}" target="_blank" style="color: #4dabf7; text-decoration: none;">${leaderName}</a>`;
+            }
+            if (coLeaderId) {
+                const coLeaderMember = currentFaction.members?.find(m => (m.id === coLeaderId || m.player_id === coLeaderId));
+                const coLeaderName = coLeaderMember?.name || 'Co-Leader';
+                cleanTable += ` | <a href="https://www.torn.com/profiles.php?XID=${coLeaderId}" target="_blank" style="color: #4dabf7; text-decoration: none;">${coLeaderName}</a>`;
+            }
+            cleanTable += `</th>`;
+            cleanTable += '</tr>';
+            cleanTable += '<tr style="background-color: #1a1a1a; border-bottom: 2px solid #d97706;">';
+            cleanTable += '<th style="padding: 10px; border: 1px solid #444; text-align: left; color: #d97706; font-weight: bold;">Total Buy Price</th>';
+            cleanTable += '<th style="padding: 10px; border: 1px solid #444; text-align: left; color: #d97706; font-weight: bold;">Cache Name</th>';
+            cleanTable += '<th style="padding: 10px; border: 1px solid #444; text-align: center; color: #d97706; font-weight: bold;">Quantity</th>';
+            cleanTable += '<th style="padding: 10px; border: 1px solid #444; text-align: right; color: #d97706; font-weight: bold;">Cheapest Listed Price</th>';
+            cleanTable += '<th style="padding: 10px; border: 1px solid #444; text-align: right; color: #d97706; font-weight: bold;">Buy Price</th>';
+            cleanTable += '</tr>';
+            cleanTable += '</thead><tbody>';
+            
+            let cleanTotalBuyPrice = 0;
+            currentCacheData.forEach((cache, index) => {
+                const bgColor = index % 2 === 0 ? '#2d2d2d' : '#353535';
+                
+                // Get the selected listing (or cheapest if no selection)
+                const selectedIndex = cache.selectedListingIndex || 0;
+                const selectedListing = cache.allListings && cache.allListings.length > 0 
+                    ? cache.allListings[selectedIndex] 
+                    : cache.listing;
+                const currentPrice = selectedListing ? selectedListing.price : cache.cheapestPrice;
+                
+                // Calculate buy price: (currentPrice - discount) * (1 - margin)
+                const afterDiscount = Math.max(0, currentPrice - discount);
+                const buyPrice = Math.round(afterDiscount * (1 - margin));
+                const buyTotal = buyPrice * cache.quantity;
+                cleanTotalBuyPrice += buyTotal;
+                
+                cleanTable += `<tr style="background-color: ${bgColor}; color: #f5f5f5;">`;
+                cleanTable += `<td style="padding: 8px; border: 1px solid #444; text-align: left; color: #fbbf24; font-weight: bold;">$${formatNumber(buyTotal)} (${formatPriceM(buyTotal)})</td>`;
+                cleanTable += `<td style="padding: 8px; border: 1px solid #444; color: #f5f5f5;">${cache.name}</td>`;
+                cleanTable += `<td style="padding: 8px; border: 1px solid #444; text-align: center; color: #f5f5f5;">${cache.quantity}</td>`;
+                cleanTable += `<td style="padding: 8px; border: 1px solid #444; text-align: right; color: #6ee7b7;">$${formatNumber(currentPrice)} (${formatPriceM(currentPrice)})</td>`;
+                cleanTable += `<td style="padding: 8px; border: 1px solid #444; text-align: right; color: #fbbf24;">$${formatNumber(buyPrice)} (${formatPriceM(buyPrice)})</td>`;
+                cleanTable += '</tr>';
+            });
+            
+            // Total row - rounded total on left
+            const cleanRoundedTotal = roundToMillion(cleanTotalBuyPrice);
+            cleanTable += '<tr style="background-color: #1a1a1a; border-top: 2px solid #d97706;">';
+            cleanTable += `<td style="padding: 10px; border: 1px solid #444; text-align: left; color: #fbbf24; font-weight: bold; font-size: 18px;">$${formatNumber(cleanRoundedTotal)} (${formatPriceM(cleanRoundedTotal)})</td>`;
+            cleanTable += `<td colspan="4" style="padding: 10px; border: 1px solid #444; text-align: right; color: #d97706; font-weight: bold;">Total Buy Price (Rounded)</td>`;
+            cleanTable += '</tr>';
+            cleanTable += '</tbody></table>';
+            
+            cleanTableHtml = cleanTable;
+            
             // Add tooltip event listeners
             const tooltipSpans = tableContainer.querySelectorAll('.price-diff-tooltip');
             tooltipSpans.forEach(span => {
                 const tooltipId = span.getAttribute('data-tooltip-id');
                 const tooltip = document.getElementById(tooltipId);
                 if (tooltip) {
+                    let hideTimeout = null;
+                    
                     // Show on hover
                     span.addEventListener('mouseenter', () => {
+                        // Clear any pending hide timeout
+                        if (hideTimeout) {
+                            clearTimeout(hideTimeout);
+                            hideTimeout = null;
+                        }
                         tooltip.style.visibility = 'visible';
                         tooltip.style.opacity = '1';
                     });
-                    span.addEventListener('mouseleave', (e) => {
-                        // Don't hide if mouse is moving to tooltip
-                        if (!tooltip.contains(e.relatedTarget)) {
+                    
+                    span.addEventListener('mouseleave', () => {
+                        // Delay hiding to allow mouse to move to tooltip
+                        hideTimeout = setTimeout(() => {
                             tooltip.style.visibility = 'hidden';
                             tooltip.style.opacity = '0';
-                        }
+                        }, 150); // Small delay to allow mouse movement to tooltip
                     });
+                    
                     // Keep tooltip visible when hovering over it
                     tooltip.addEventListener('mouseenter', () => {
+                        // Clear any pending hide timeout
+                        if (hideTimeout) {
+                            clearTimeout(hideTimeout);
+                            hideTimeout = null;
+                        }
                         tooltip.style.visibility = 'visible';
                         tooltip.style.opacity = '1';
                     });
+                    
                     tooltip.addEventListener('mouseleave', () => {
                         tooltip.style.visibility = 'hidden';
                         tooltip.style.opacity = '0';
@@ -1929,7 +1969,7 @@
         copyBtn.onmouseover = () => { copyBtn.style.backgroundColor = '#d97706'; copyBtn.style.color = '#fff'; };
         copyBtn.onmouseout = () => { copyBtn.style.backgroundColor = '#444'; copyBtn.style.color = '#fff'; };
         copyBtn.onclick = () => {
-            GM_setClipboard(currentTableHtml, 'text');
+            GM_setClipboard(cleanTableHtml, 'text');
             copyBtn.textContent = 'Copied!';
             setTimeout(() => copyBtn.textContent = '📋 Copy HTML table', 1500);
         };
@@ -1942,7 +1982,6 @@
         factionSelect.addEventListener('change', updateTable);
         discountInput.addEventListener('input', updateTable);
         marginInput.addEventListener('input', updateTable);
-        deviationInput.addEventListener('input', updateTable);
 
         modal.appendChild(header);
         modal.appendChild(optionsContainer);
