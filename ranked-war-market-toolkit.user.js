@@ -1028,18 +1028,37 @@
                 },
                 onload: function(response) {
                     try {
-                        const data = JSON.parse(response.responseText);
+                        // Check if response exists and has responseText
+                        if (!response) {
+                            reject(new Error('No response received from weav3r API'));
+                            return;
+                        }
+                        
+                        // Handle different response formats (some platforms use responseText, others use response)
+                        const responseText = response.responseText || response.response || '';
+                        
+                        if (!responseText) {
+                            reject(new Error('Empty response from weav3r API'));
+                            return;
+                        }
+                        
+                        const data = JSON.parse(responseText);
                         if (data.error) {
                             reject(new Error(data.error));
                             return;
                         }
                         resolve(data);
                     } catch (e) {
-                        reject(e);
+                        console.error(`Error parsing response for item ${itemId}:`, e, response);
+                        reject(new Error(`Failed to parse response: ${e.message}`));
                     }
                 },
                 onerror: function(error) {
-                    reject(error);
+                    console.error(`Request error for item ${itemId}:`, error);
+                    reject(new Error(error?.message || 'Network error fetching item price'));
+                },
+                ontimeout: function() {
+                    reject(new Error('Request timeout for item price'));
                 }
             });
         });
@@ -1326,7 +1345,28 @@
                     continue;
                 }
                 
-                const priceData = await fetchItemPrice(item.id);
+                let priceData = null;
+                try {
+                    priceData = await fetchItemPrice(item.id);
+                } catch (fetchError) {
+                    console.error(`Error fetching price for item ${item.id} (${item.name}):`, fetchError);
+                    // Continue with error entry
+                    cacheData.push({
+                        id: item.id,
+                        name: item.name || 'Unknown',
+                        quantity: item.quantity || 0,
+                        cheapestPrice: 0,
+                        listing: null,
+                        allListings: [],
+                        selectedListingIndex: 0,
+                        marketPrice: null,
+                        bazaarAverage: null,
+                        error: fetchError?.message || 'Failed to fetch price data'
+                    });
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                    continue;
+                }
+                
                 if (!priceData) {
                     console.error(`No price data returned for item ${item.id} (${item.name})`);
                     cacheData.push({
@@ -1341,6 +1381,7 @@
                         bazaarAverage: null,
                         error: 'No price data returned'
                     });
+                    await new Promise(resolve => setTimeout(resolve, 200));
                     continue;
                 }
                 
