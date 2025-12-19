@@ -13,7 +13,7 @@
     'use strict';
 
     // Configuration
-    const API_KEY = '###PDA-APIKEY###';
+    const API_KEY = 'N5QIbwvDBI0uXd5o';
     const API_BASE = 'https://api.torn.com/v2';
     const WEAV3R_API = 'https://weav3r.dev/api/marketplace';
     const PRICE_DISCOUNT = 0.05; // 5% discount
@@ -1306,15 +1306,44 @@
 
     // Helper function to fetch cache prices for a faction
     async function fetchFactionCachePrices(faction, loadingMsg) {
+        if (!faction) {
+            console.error('fetchFactionCachePrices: faction is null/undefined');
+            return [];
+        }
+        
         const cacheItems = faction.rewards?.items || [];
         if (cacheItems.length === 0) {
+            console.log(`No cache items found for faction ${faction.id} (${faction.name})`);
             return [];
         }
 
+        console.log(`Fetching cache prices for faction ${faction.id} (${faction.name}), ${cacheItems.length} items`);
         const cacheData = [];
         for (const item of cacheItems) {
             try {
+                if (!item || !item.id) {
+                    console.error('Invalid item data:', item);
+                    continue;
+                }
+                
                 const priceData = await fetchItemPrice(item.id);
+                if (!priceData) {
+                    console.error(`No price data returned for item ${item.id} (${item.name})`);
+                    cacheData.push({
+                        id: item.id,
+                        name: item.name || 'Unknown',
+                        quantity: item.quantity || 0,
+                        cheapestPrice: 0,
+                        listing: null,
+                        allListings: [],
+                        selectedListingIndex: 0,
+                        marketPrice: null,
+                        bazaarAverage: null,
+                        error: 'No price data returned'
+                    });
+                    continue;
+                }
+                
                 const listings = priceData.listings || [];
                 if (listings.length > 0) {
                     // Sort listings by price (cheapest first)
@@ -1345,19 +1374,22 @@
                 }
                 await new Promise(resolve => setTimeout(resolve, 200));
             } catch (error) {
-                console.error(`Error fetching price for ${item.name}:`, error);
+                console.error(`Error fetching price for ${item?.name || 'unknown'} (ID: ${item?.id || 'unknown'}):`, error);
                 cacheData.push({
-                    id: item.id,
-                    name: item.name,
-                    quantity: item.quantity,
+                    id: item?.id || 0,
+                    name: item?.name || 'Unknown',
+                    quantity: item?.quantity || 0,
                     cheapestPrice: 0,
                     listing: null,
+                    allListings: [],
+                    selectedListingIndex: 0,
                     marketPrice: null,
                     bazaarAverage: null,
                     error: error.message
                 });
             }
         }
+        console.log(`Completed fetching cache prices for faction ${faction.id}, got ${cacheData.length} items`);
         return cacheData;
     }
 
@@ -1385,7 +1417,7 @@
                 border: 1px solid #d97706;
                 font-weight: bold;
             `;
-            loadingMsg.textContent = 'Loading war data...';
+            loadingMsg.textContent = 'Loading war data and gathering cache information...';
             document.body.appendChild(loadingMsg);
 
             const warData = await fetchWarReport(rankID);
@@ -1398,16 +1430,31 @@
             const winnerFaction = report.factions.find(f => f.id === report.winner);
             const loserFaction = report.factions.find(f => f.id !== report.winner);
             
-            if (!winnerFaction || !loserFaction) {
-                throw new Error('Could not find both factions');
+            if (!winnerFaction) {
+                throw new Error('Could not find winner faction');
+            }
+            if (!loserFaction) {
+                throw new Error('Could not find loser faction');
             }
 
             // Fetch cache prices for both factions
-            loadingMsg.textContent = 'Fetching cache prices for winner...';
-            const winnerCacheData = await fetchFactionCachePrices(winnerFaction, loadingMsg);
+            loadingMsg.textContent = 'Gathering cache information for both factions...';
+            let winnerCacheData = [];
+            let loserCacheData = [];
             
-            loadingMsg.textContent = 'Fetching cache prices for loser...';
-            const loserCacheData = await fetchFactionCachePrices(loserFaction, loadingMsg);
+            try {
+                winnerCacheData = await fetchFactionCachePrices(winnerFaction, loadingMsg);
+            } catch (error) {
+                console.error('Error fetching winner cache prices:', error);
+                // Continue even if winner fails
+            }
+            
+            try {
+                loserCacheData = await fetchFactionCachePrices(loserFaction, loadingMsg);
+            } catch (error) {
+                console.error('Error fetching loser cache prices:', error);
+                // Continue even if loser fails - show what we have
+            }
 
             loadingMsg.remove();
             showCacheResults(report, winnerFaction, winnerCacheData, loserFaction, loserCacheData);
