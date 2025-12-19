@@ -1040,18 +1040,72 @@
 
     // Fetch item price from weav3r.dev
     async function fetchItemPrice(itemId) {
-        try {
-            return await makeHttpRequest({
+        return new Promise((resolve, reject) => {
+            if (typeof GM_xmlhttpRequest === 'undefined') {
+                reject(new Error('GM_xmlhttpRequest is not available'));
+                return;
+            }
+            
+            GM_xmlhttpRequest({
                 method: 'GET',
                 url: `${WEAV3R_API}/${itemId}`,
                 headers: {
                     'accept': 'application/json'
+                },
+                onload: function(response) {
+                    try {
+                        console.log(`[fetchItemPrice] Response for item ${itemId}:`, {
+                            status: response.status,
+                            statusText: response.statusText,
+                            readyState: response.readyState,
+                            responseHeaders: response.responseHeaders,
+                            responseText: response.responseText,
+                            response: response.response,
+                            fullResponse: response
+                        });
+                        
+                        // Check if response exists
+                        if (!response) {
+                            console.error(`[fetchItemPrice] No response object for item ${itemId}`);
+                            reject(new Error('No response received from weav3r API'));
+                            return;
+                        }
+                        
+                        // Handle different response formats
+                        const responseText = response.responseText || response.response || '';
+                        
+                        if (!responseText) {
+                            console.error(`[fetchItemPrice] Empty responseText for item ${itemId}. Full response:`, response);
+                            reject(new Error('Empty response from weav3r API'));
+                            return;
+                        }
+                        
+                        const data = typeof responseText === 'string' ? JSON.parse(responseText) : responseText;
+                        if (data.error) {
+                            console.error(`[fetchItemPrice] API error for item ${itemId}:`, data.error);
+                            reject(new Error(data.error));
+                            return;
+                        }
+                        resolve(data);
+                    } catch (e) {
+                        console.error(`[fetchItemPrice] Error parsing response for item ${itemId}:`, e);
+                        console.error(`[fetchItemPrice] Response object:`, response);
+                        console.error(`[fetchItemPrice] responseText:`, response?.responseText);
+                        console.error(`[fetchItemPrice] response:`, response?.response);
+                        reject(new Error(`Failed to parse response: ${e.message}`));
+                    }
+                },
+                onerror: function(error) {
+                    console.error(`[fetchItemPrice] Request error for item ${itemId}:`, error);
+                    console.error(`[fetchItemPrice] Full error object:`, JSON.stringify(error, null, 2));
+                    reject(new Error(error?.message || 'Network error fetching item price'));
+                },
+                ontimeout: function() {
+                    console.error(`[fetchItemPrice] Request timeout for item ${itemId}`);
+                    reject(new Error('Request timeout for item price'));
                 }
             });
-        } catch (error) {
-            console.error(`Request error for item ${itemId}:`, error);
-            throw error;
-        }
+        });
     }
 
     // Get faction leader ID from Torn API (basic endpoint)
@@ -1309,20 +1363,29 @@
             return [];
         }
 
-        console.log(`Fetching cache prices for faction ${faction.id} (${faction.name}), ${cacheItems.length} items`);
+        console.log(`[fetchFactionCachePrices] Fetching cache prices for faction ${faction.id} (${faction.name}), ${cacheItems.length} items`);
         const cacheData = [];
-        for (const item of cacheItems) {
+        for (let i = 0; i < cacheItems.length; i++) {
+            const item = cacheItems[i];
             try {
                 if (!item || !item.id) {
-                    console.error('Invalid item data:', item);
+                    console.error(`[fetchFactionCachePrices] Invalid item data at index ${i}:`, item);
                     continue;
                 }
+                
+                console.log(`[fetchFactionCachePrices] Processing item ${i + 1}/${cacheItems.length}: ${item.name} (ID: ${item.id}) for faction ${faction.name}`);
                 
                 let priceData = null;
                 try {
                     priceData = await fetchItemPrice(item.id);
+                    console.log(`[fetchFactionCachePrices] Successfully fetched price data for ${item.name} (ID: ${item.id})`);
                 } catch (fetchError) {
-                    console.error(`Error fetching price for item ${item.id} (${item.name}):`, fetchError);
+                    console.error(`[fetchFactionCachePrices] Error fetching price for item ${item.id} (${item.name}) in faction ${faction.name}:`, fetchError);
+                    console.error(`[fetchFactionCachePrices] Error details:`, {
+                        message: fetchError?.message,
+                        stack: fetchError?.stack,
+                        error: fetchError
+                    });
                     // Continue with error entry
                     cacheData.push({
                         id: item.id,
