@@ -42,57 +42,85 @@
 
     // Helper function to make HTTP requests (compatible with Tampermonkey and PDA)
     function makeHttpRequest(options) {
-        // Use GM_xmlhttpRequest which should work in both Tampermonkey and PDA
-        if (typeof GM_xmlhttpRequest !== 'undefined') {
-            return new Promise((resolve, reject) => {
-                GM_xmlhttpRequest({
-                    method: options.method || 'GET',
-                    url: options.url,
-                    headers: options.headers || {},
-                    onload: function(response) {
-                        try {
-                            if (!response) {
-                                reject(new Error('No response received'));
-                                return;
-                            }
-                            // Handle different response formats
-                            const responseText = response.responseText || response.response || '';
-                            if (!responseText) {
-                                reject(new Error('Empty response'));
-                                return;
-                            }
-                            const data = typeof responseText === 'string' ? JSON.parse(responseText) : responseText;
-                            if (data && data.error) {
-                                reject(new Error(data.error.error || data.error || 'API error'));
-                                return;
-                            }
-                            resolve(data);
-                        } catch (e) {
-                            console.error('Error parsing response:', e, response);
-                            reject(new Error(`Failed to parse response: ${e.message}`));
-                        }
-                    },
-                    onerror: function(error) {
-                        console.error('Request error:', error);
-                        reject(new Error(error?.message || 'Network error'));
-                    },
-                    ontimeout: function() {
-                        reject(new Error('Request timeout'));
-                    }
-                });
-            });
-        } else {
+        // Always use GM_xmlhttpRequest - it should work in both Tampermonkey and PDA
+        if (typeof GM_xmlhttpRequest === 'undefined') {
+            console.error('[makeHttpRequest] GM_xmlhttpRequest is not available');
             // Fallback to fetch API if available
-            return fetch(options.url, {
-                method: options.method || 'GET',
-                headers: options.headers || {}
-            }).then(response => {
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-                return response.json();
-            });
+            if (typeof fetch !== 'undefined') {
+                return fetch(options.url, {
+                    method: options.method || 'GET',
+                    headers: options.headers || {}
+                }).then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    return response.json();
+                });
+            }
+            throw new Error('No HTTP request method available');
         }
+        
+        // Standard Tampermonkey environment or PDA with GM_xmlhttpRequest
+        return new Promise((resolve, reject) => {
+            try {
+                console.log(`[makeHttpRequest] Making request to: ${options.url}`);
+                GM_xmlhttpRequest({
+                        method: options.method || 'GET',
+                        url: options.url,
+                        headers: options.headers || {},
+                        onload: function(response) {
+                            try {
+                                console.log(`[makeHttpRequest] Response received for ${options.url}:`, {
+                                    status: response?.status,
+                                    statusText: response?.statusText,
+                                    hasResponseText: !!response?.responseText,
+                                    hasResponse: !!response?.response,
+                                    responseType: typeof response
+                                });
+                                
+                                if (!response) {
+                                    console.error('[makeHttpRequest] No response object received');
+                                    reject(new Error('No response received'));
+                                    return;
+                                }
+                                // Handle different response formats
+                                const responseText = response.responseText || response.response || '';
+                                if (!responseText) {
+                                    console.error('[makeHttpRequest] Empty responseText. Full response object:', response);
+                                    reject(new Error('Empty response'));
+                                    return;
+                                }
+                                const data = typeof responseText === 'string' ? JSON.parse(responseText) : responseText;
+                                if (data && data.error) {
+                                    console.error('[makeHttpRequest] API returned error:', data.error);
+                                    reject(new Error(data.error.error || data.error || 'API error'));
+                                    return;
+                                }
+                                resolve(data);
+                            } catch (e) {
+                                console.error('[makeHttpRequest] Error parsing response:', e);
+                                console.error('[makeHttpRequest] Response object:', response);
+                                console.error('[makeHttpRequest] Error stack:', e.stack);
+                                reject(new Error(`Failed to parse response: ${e.message}`));
+                            }
+                        },
+                        onerror: function(error) {
+                            console.error('[makeHttpRequest] Request error for', options.url, ':', error);
+                            console.error('[makeHttpRequest] Error object details:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
+                            reject(new Error(error?.message || 'Network error'));
+                        },
+                        ontimeout: function() {
+                            console.error('[makeHttpRequest] Request timeout for:', options.url);
+                            reject(new Error('Request timeout'));
+                        }
+                    });
+                } catch (e) {
+                    console.error('[makeHttpRequest] Exception calling GM_xmlhttpRequest for', options.url, ':', e);
+                    console.error('[makeHttpRequest] Exception stack:', e.stack);
+                    console.error('[makeHttpRequest] Exception details:', JSON.stringify(e, Object.getOwnPropertyNames(e)));
+                    reject(new Error(`GM_xmlhttpRequest failed: ${e.message}`));
+                }
+            });
     }
 
     // Helper function to check if item is ranked war weapon or armor
