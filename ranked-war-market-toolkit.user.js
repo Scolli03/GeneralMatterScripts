@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ranked War Toolkit
 // @namespace    http://tampermonkey.net/
-// @version      2.2.3
+// @version      2.3.2
 // @description  Ranked War toolkit: Market Lister, Cache Prices, and Buy Quotes
 // @author       Scolli03[3150751], GeneralMatter
 // @match        https://www.torn.com/*
@@ -18,7 +18,7 @@
     const WEAV3R_API = 'https://weav3r.dev/api/marketplace';
     const PRICE_DISCOUNT = 0.05; // 5% discount
     const CACHE_PRICE_DISCOUNT = 1000000; // 1 million
-    const CACHE_MARGIN_PERCENT = 0.03; // 3% margin
+    const CACHE_MARGIN_PERCENT = 0.025; // 2.5% margin
 
     // Ranked war weapon and armor item IDs
     // These are the item IDs for ranked war weapons and armor in Torn
@@ -1066,8 +1066,19 @@
         });
     }
 
-    // Fetch item price from weav3r.dev
+    // Cache for weav3r API responses (60 second cache on their end, so we cache for 55 seconds to be safe)
+    const priceCache = {};
+    const CACHE_DURATION = 55000; // 55 seconds in milliseconds
+
+    // Fetch item price from weav3r.dev (with caching to avoid duplicate requests)
     async function fetchItemPrice(itemId) {
+        // Check cache first
+        const cacheKey = itemId.toString();
+        const cached = priceCache[cacheKey];
+        if (cached && (Date.now() - cached.timestamp) < CACHE_DURATION) {
+            return Promise.resolve(cached.data);
+        }
+        
         return new Promise((resolve, reject) => {
             if (typeof GM_xmlhttpRequest === 'undefined') {
                 reject(new Error('GM_xmlhttpRequest is not available'));
@@ -1082,19 +1093,8 @@
                 },
                 onload: function(response) {
                     try {
-                        console.log(`[fetchItemPrice] Response for item ${itemId}:`, {
-                            status: response.status,
-                            statusText: response.statusText,
-                            readyState: response.readyState,
-                            responseHeaders: response.responseHeaders,
-                            responseText: response.responseText,
-                            response: response.response,
-                            fullResponse: response
-                        });
-                        
                         // Check if response exists
                         if (!response) {
-                            console.error(`[fetchItemPrice] No response object for item ${itemId}`);
                             reject(new Error('No response received from weav3r API'));
                             return;
                         }
@@ -1103,33 +1103,33 @@
                         const responseText = response.responseText || response.response || '';
                         
                         if (!responseText) {
-                            console.error(`[fetchItemPrice] Empty responseText for item ${itemId}. Full response:`, response);
                             reject(new Error('Empty response from weav3r API'));
                             return;
                         }
                         
                         const data = typeof responseText === 'string' ? JSON.parse(responseText) : responseText;
                         if (data.error) {
-                            console.error(`[fetchItemPrice] API error for item ${itemId}:`, data.error);
                             reject(new Error(data.error));
                             return;
                         }
+                        
+                        // Store in cache
+                        priceCache[cacheKey] = {
+                            data: data,
+                            timestamp: Date.now()
+                        };
+                        
                         resolve(data);
                     } catch (e) {
-                        console.error(`[fetchItemPrice] Error parsing response for item ${itemId}:`, e);
-                        console.error(`[fetchItemPrice] Response object:`, response);
-                        console.error(`[fetchItemPrice] responseText:`, response?.responseText);
-                        console.error(`[fetchItemPrice] response:`, response?.response);
+                        console.error(`Error parsing response for item ${itemId}:`, e);
                         reject(new Error(`Failed to parse response: ${e.message}`));
                     }
                 },
                 onerror: function(error) {
-                    console.error(`[fetchItemPrice] Request error for item ${itemId}:`, error);
-                    console.error(`[fetchItemPrice] Full error object:`, JSON.stringify(error, null, 2));
+                    console.error(`Request error for item ${itemId}:`, error);
                     reject(new Error(error?.message || 'Network error fetching item price'));
                 },
                 ontimeout: function() {
-                    console.error(`[fetchItemPrice] Request timeout for item ${itemId}`);
                     reject(new Error('Request timeout for item price'));
                 }
             });
