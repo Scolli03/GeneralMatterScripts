@@ -13,7 +13,7 @@
     'use strict';
 
     // Configuration
-    const API_KEY = 'N5QIbwvDBI0uXd5o';
+    const API_KEY = '###PDA-APIKEY###';
     const API_BASE = 'https://api.torn.com/v2';
     const WEAV3R_API = 'https://weav3r.dev/api/marketplace';
     const PRICE_DISCOUNT = 0.05; // 5% discount
@@ -39,6 +39,61 @@
         WEAPON: ['Melee', 'Ranged', 'Temporary'],
         ARMOR: ['Armor', 'Helmet', 'Gloves', 'Boots']
     };
+
+    // Helper function to make HTTP requests (compatible with Tampermonkey and PDA)
+    function makeHttpRequest(options) {
+        // Use GM_xmlhttpRequest which should work in both Tampermonkey and PDA
+        if (typeof GM_xmlhttpRequest !== 'undefined') {
+            return new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: options.method || 'GET',
+                    url: options.url,
+                    headers: options.headers || {},
+                    onload: function(response) {
+                        try {
+                            if (!response) {
+                                reject(new Error('No response received'));
+                                return;
+                            }
+                            // Handle different response formats
+                            const responseText = response.responseText || response.response || '';
+                            if (!responseText) {
+                                reject(new Error('Empty response'));
+                                return;
+                            }
+                            const data = typeof responseText === 'string' ? JSON.parse(responseText) : responseText;
+                            if (data && data.error) {
+                                reject(new Error(data.error.error || data.error || 'API error'));
+                                return;
+                            }
+                            resolve(data);
+                        } catch (e) {
+                            console.error('Error parsing response:', e, response);
+                            reject(new Error(`Failed to parse response: ${e.message}`));
+                        }
+                    },
+                    onerror: function(error) {
+                        console.error('Request error:', error);
+                        reject(new Error(error?.message || 'Network error'));
+                    },
+                    ontimeout: function() {
+                        reject(new Error('Request timeout'));
+                    }
+                });
+            });
+        } else {
+            // Fallback to fetch API if available
+            return fetch(options.url, {
+                method: options.method || 'GET',
+                headers: options.headers || {}
+            }).then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                return response.json();
+            });
+        }
+    }
 
     // Helper function to check if item is ranked war weapon or armor
     function isRankedWarItem(item) {
@@ -100,31 +155,14 @@
 
     // Fetch user's item market listings
     async function fetchItemMarket(offset = 0) {
-        return new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-                method: 'GET',
-                url: `${API_BASE}/user/itemmarket?offset=${offset}`,
-                headers: {
-                    'accept': 'application/json',
-                    'Authorization': `ApiKey ${API_KEY}`,
-                    'User-Agent': 'TornPDA-UserScript/1.0'
-                },
-                onload: function(response) {
-                    try {
-                        const data = JSON.parse(response.responseText);
-                        if (data.error) {
-                            reject(new Error(data.error.error || data.error));
-                            return;
-                        }
-                        resolve(data);
-                    } catch (e) {
-                        reject(e);
-                    }
-                },
-                onerror: function(error) {
-                    reject(error);
-                }
-            });
+        return makeHttpRequest({
+            method: 'GET',
+            url: `${API_BASE}/user/itemmarket?offset=${offset}`,
+            headers: {
+                'accept': 'application/json',
+                'Authorization': `ApiKey ${API_KEY}`,
+                'User-Agent': 'TornPDA-UserScript/1.0'
+            }
         });
     }
 
@@ -989,110 +1027,45 @@
 
     // Fetch ranked war report from Torn API
     async function fetchWarReport(rankID) {
-        return new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-                method: 'GET',
-                url: `${API_BASE}/faction/${rankID}/rankedwarreport`,
-                headers: {
-                    'accept': 'application/json',
-                    'Authorization': `ApiKey ${API_KEY}`,
-                    'User-Agent': 'TornPDA-UserScript/1.0'
-                },
-                onload: function(response) {
-                    try {
-                        const data = JSON.parse(response.responseText);
-                        if (data.error) {
-                            reject(new Error(data.error.error || data.error));
-                            return;
-                        }
-                        resolve(data);
-                    } catch (e) {
-                        reject(e);
-                    }
-                },
-                onerror: function(error) {
-                    reject(error);
-                }
-            });
+        return makeHttpRequest({
+            method: 'GET',
+            url: `${API_BASE}/faction/${rankID}/rankedwarreport`,
+            headers: {
+                'accept': 'application/json',
+                'Authorization': `ApiKey ${API_KEY}`,
+                'User-Agent': 'TornPDA-UserScript/1.0'
+            }
         });
     }
 
     // Fetch item price from weav3r.dev
     async function fetchItemPrice(itemId) {
-        return new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
+        try {
+            return await makeHttpRequest({
                 method: 'GET',
                 url: `${WEAV3R_API}/${itemId}`,
                 headers: {
                     'accept': 'application/json'
-                },
-                onload: function(response) {
-                    try {
-                        // Check if response exists and has responseText
-                        if (!response) {
-                            reject(new Error('No response received from weav3r API'));
-                            return;
-                        }
-                        
-                        // Handle different response formats (some platforms use responseText, others use response)
-                        const responseText = response.responseText || response.response || '';
-                        
-                        if (!responseText) {
-                            reject(new Error('Empty response from weav3r API'));
-                            return;
-                        }
-                        
-                        const data = JSON.parse(responseText);
-                        if (data.error) {
-                            reject(new Error(data.error));
-                            return;
-                        }
-                        resolve(data);
-                    } catch (e) {
-                        console.error(`Error parsing response for item ${itemId}:`, e, response);
-                        reject(new Error(`Failed to parse response: ${e.message}`));
-                    }
-                },
-                onerror: function(error) {
-                    console.error(`Request error for item ${itemId}:`, error);
-                    reject(new Error(error?.message || 'Network error fetching item price'));
-                },
-                ontimeout: function() {
-                    reject(new Error('Request timeout for item price'));
                 }
             });
-        });
+        } catch (error) {
+            console.error(`Request error for item ${itemId}:`, error);
+            throw error;
+        }
     }
 
     // Get faction leader ID from Torn API (basic endpoint)
     async function getFactionLeader(factionId) {
-        return new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-                method: 'GET',
-                url: `${API_BASE}/faction/${factionId}/basic`,
-                headers: {
-                    'accept': 'application/json',
-                    'Authorization': `ApiKey ${API_KEY}`,
-                    'User-Agent': 'TornPDA-UserScript/1.0'
-                },
-                onload: function(response) {
-                    try {
-                        const data = JSON.parse(response.responseText);
-                        if (data.error) {
-                            reject(new Error(data.error.error || data.error));
-                            return;
-                        }
-                        const leader = data.basic?.leader_id || null;
-                        resolve(leader);
-                    } catch (e) {
-                        reject(e);
-                    }
-                },
-                onerror: function(error) {
-                    reject(error);
-                }
-            });
+        const data = await makeHttpRequest({
+            method: 'GET',
+            url: `${API_BASE}/faction/${factionId}/basic`,
+            headers: {
+                'accept': 'application/json',
+                'Authorization': `ApiKey ${API_KEY}`,
+                'User-Agent': 'TornPDA-UserScript/1.0'
+            }
         });
+        return data.basic?.leader_id || null;
     }
 
     // Open tool picker modal
@@ -1694,31 +1667,14 @@
             let leaderId = null;
             let coLeaderId = null;
             try {
-                const basicData = await new Promise((resolve, reject) => {
-                    GM_xmlhttpRequest({
-                        method: 'GET',
-                        url: `${API_BASE}/faction/${currentFaction.id}/basic`,
-                        headers: {
-                            'accept': 'application/json',
-                            'Authorization': `ApiKey ${API_KEY}`,
-                            'User-Agent': 'TornPDA-UserScript/1.0'
-                        },
-                        onload: function(response) {
-                            try {
-                                const data = JSON.parse(response.responseText);
-                                if (data.error) {
-                                    reject(new Error(data.error.error || data.error));
-                                    return;
-                                }
-                                resolve(data);
-                            } catch (e) {
-                                reject(e);
-                            }
-                        },
-                        onerror: function(error) {
-                            reject(error);
-                        }
-                    });
+                const basicData = await makeHttpRequest({
+                    method: 'GET',
+                    url: `${API_BASE}/faction/${currentFaction.id}/basic`,
+                    headers: {
+                        'accept': 'application/json',
+                        'Authorization': `ApiKey ${API_KEY}`,
+                        'User-Agent': 'TornPDA-UserScript/1.0'
+                    }
                 });
                 
                 leaderId = basicData.basic?.leader_id || null;
